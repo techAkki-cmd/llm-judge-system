@@ -7,12 +7,14 @@ from schemas import Scope
 contexts: dict[tuple[str, str], dict] = {}
 conversations: dict[str, list[dict]] = {}
 merchant_auto_replies: dict[str, dict] = {}
+sent_suppression_keys: set[str] = set()
 
 
 class AsyncContextStore:
     def __init__(self, backing_store: dict[tuple[str, str], dict]) -> None:
         self._store = backing_store
         self._lock = asyncio.Lock()
+        self.sent_suppression_keys = sent_suppression_keys
 
     async def put_if_newer(
         self, scope: Scope, context_id: str, version: int, payload: dict[str, Any]
@@ -54,6 +56,22 @@ class AsyncContextStore:
                     latest = dict(value["payload"])
                     latest_version = version
             return latest
+
+    async def reserve_suppression_key(self, suppression_key: str) -> bool:
+        if not suppression_key:
+            return True
+        async with self._lock:
+            if suppression_key in self.sent_suppression_keys:
+                return False
+            self.sent_suppression_keys.add(suppression_key)
+            return True
+
+    async def teardown(self) -> None:
+        async with self._lock:
+            self._store.clear()
+            self.sent_suppression_keys.clear()
+            merchant_auto_replies.clear()
+            conversations.clear()
 
 
 class ConversationStore:

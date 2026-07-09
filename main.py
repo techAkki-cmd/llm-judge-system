@@ -144,7 +144,7 @@ async def push_context(body: ContextPush) -> JSONResponse:
 @app.post("/v1/tick")
 async def tick(body: TickRequest) -> dict[str, list[Any]]:
     actions: list[dict[str, Any]] = []
-    for trigger_id in body.available_triggers:
+    for trigger_id in body.available_triggers[:20]:
         trigger = await store.get_payload(Scope.trigger, trigger_id)
         if not trigger:
             continue
@@ -190,9 +190,10 @@ async def tick(body: TickRequest) -> dict[str, list[Any]]:
                 "suppression_key": trigger.get("suppression_key", ""),
             }
         )
+        if not await store.reserve_suppression_key(str(action.get("suppression_key") or "")):
+            continue
         actions.append(action)
-        return {"actions": actions}
-    return {"actions": []}
+    return {"actions": actions}
 
 
 @app.post("/v1/reply")
@@ -225,3 +226,9 @@ async def reply(body: ReplyRequest) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("LLM composer failed for reply %s: %s", body.conversation_id, exc)
         return {"action": "wait", "wait_seconds": 300, "rationale": "LLM timeout fallback."}
+
+
+@app.post("/v1/teardown")
+async def teardown_state() -> dict[str, str]:
+    await store.teardown()
+    return {"status": "success", "message": "State cleared"}
