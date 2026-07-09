@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vera WhatsApp Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        background:
+          linear-gradient(180deg, rgba(7, 94, 84, 0.14), transparent 34%),
+          #eef3ef;
+      }
+
+      .chat-pattern {
+        background-color: #e8ddd2;
+        background-image:
+          radial-gradient(circle at 16px 16px, rgba(255, 255, 255, 0.28) 0 1px, transparent 1px),
+          radial-gradient(circle at 48px 48px, rgba(7, 94, 84, 0.1) 0 1px, transparent 1px);
+        background-size: 64px 64px;
+      }
+
+      .bubble-out {
+        border-radius: 8px 8px 2px 8px;
+      }
+
+      .bubble-in {
+        border-radius: 8px 8px 8px 2px;
+      }
+
+      .scrollbar-thin::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background: rgba(15, 76, 66, 0.28);
+        border-radius: 999px;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen text-slate-900">
+    <main class="mx-auto flex min-h-screen max-w-7xl flex-col p-3 sm:p-5">
+      <section class="grid min-h-[calc(100vh-1.5rem)] overflow-hidden border border-emerald-950/10 bg-white shadow-xl lg:grid-cols-[360px_1fr]">
+        <aside class="flex flex-col border-b border-slate-200 bg-slate-50 lg:border-b-0 lg:border-r">
+          <div class="border-b border-slate-200 bg-white px-5 py-5">
+            <div class="flex items-center gap-3">
+              <div class="grid h-11 w-11 place-items-center rounded bg-emerald-700 text-lg font-bold text-white">V</div>
+              <div>
+                <h1 class="text-xl font-semibold tracking-tight">Vera Simulator</h1>
+                <p class="text-sm text-slate-500">magicpin AI challenge demo</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-5 overflow-y-auto p-5 scrollbar-thin">
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-slate-700">Canonical demo pair</span>
+              <select id="pairSelect" class="w-full border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/20"></select>
+            </label>
+
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div class="border border-slate-200 bg-white p-3">
+                <p class="text-xs uppercase tracking-wide text-slate-500">Merchant</p>
+                <p id="merchantName" class="mt-1 font-semibold text-slate-900"></p>
+              </div>
+              <div class="border border-slate-200 bg-white p-3">
+                <p class="text-xs uppercase tracking-wide text-slate-500">Send as</p>
+                <p id="sendAs" class="mt-1 font-semibold text-slate-900"></p>
+              </div>
+              <div class="col-span-2 border border-slate-200 bg-white p-3">
+                <p class="text-xs uppercase tracking-wide text-slate-500">Trigger</p>
+                <p id="triggerKind" class="mt-1 font-mono text-sm text-slate-900"></p>
+              </div>
+            </div>
+
+            <button
+              id="simulateBtn"
+              class="flex w-full items-center justify-center gap-2 bg-emerald-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              <span id="btnText">Simulate Tick</span>
+            </button>
+
+            <div id="status" class="border border-slate-200 bg-white p-3 text-sm text-slate-600">
+              Select a pair and run the tick simulation.
+            </div>
+
+            <div class="border border-emerald-900/15 bg-emerald-50 p-4">
+              <p class="text-sm font-semibold text-emerald-950">Judge-visible signal</p>
+              <p class="mt-2 text-sm leading-6 text-emerald-950/80">
+                This demo uses the same `/v1/context` and `/v1/tick` contract as the automated judge, then renders Vera's action and rationale as a WhatsApp exchange.
+              </p>
+            </div>
+          </div>
+        </aside>
+
+        <section class="flex min-h-[720px] flex-col bg-slate-100">
+          <header class="flex items-center justify-between border-b border-emerald-950/10 bg-[#075e54] px-4 py-4 text-white sm:px-6">
+            <div class="flex items-center gap-3">
+              <div class="grid h-11 w-11 place-items-center rounded-full bg-white/15 text-sm font-bold">VA</div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h2 class="font-semibold">Vera (magicpin AI)</h2>
+                  <span class="h-2.5 w-2.5 rounded-full bg-emerald-300"></span>
+                </div>
+                <p class="text-xs text-white/75">online • deterministic routing + LLM composer</p>
+              </div>
+            </div>
+            <div class="hidden text-right text-xs text-white/75 sm:block">
+              <p id="headerPair"></p>
+              <p>localhost:8080</p>
+            </div>
+          </header>
+
+          <div id="chat" class="chat-pattern flex-1 space-y-4 overflow-y-auto p-4 scrollbar-thin sm:p-6"></div>
+
+          <footer class="border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">
+            <div class="flex items-center gap-3">
+              <div class="flex-1 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">Vera will compose after the selected tick fires.</div>
+              <button
+                id="footerBtn"
+                class="bg-[#25d366] px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-[#20bd5a]"
+              >
+                Run
+              </button>
+            </div>
+          </footer>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const VERSION = 200;
+      const NOW = "2026-04-26T10:00:00Z";
+      const fallbackMarkers = ["LLM timeout fallback", "Stub for", "[LLM COMPOSE STUB]"];
+
+      const baseCategories = {
+        restaurants: {
+          slug: "restaurants",
+          voice: { tone: "operator", vocab_allowed: ["covers", "delivery", "repeat orders", "footfall"] },
+          offer_catalog: [],
+          peer_stats: {},
+          digest: []
+        },
+        dentists: {
+          slug: "dentists",
+          voice: { tone: "clinical peer", vocab_allowed: ["recall", "fluoride", "caries", "patient education"] },
+          offer_catalog: [],
+          peer_stats: {},
+          digest: [
+            {
+              id: "d_2026W17_dci_radiograph",
+              kind: "regulation_change",
+              title: "DCI intraoral radiograph consent update",
+              source: "DCI April 2026 circular",
+              summary: "Document explicit consent before routine intraoral radiographs.",
+              actionable: "Notify patients and update front-desk checklist."
+            }
+          ]
+        },
+        pharmacies: {
+          slug: "pharmacies",
+          voice: { tone: "trusted pharmacist", vocab_allowed: ["Rx", "refill", "delivery", "repeat customers"] },
+          offer_catalog: [],
+          peer_stats: {},
+          digest: []
+        },
+        salons: {
+          slug: "salons",
+          voice: { tone: "warm salon operator", vocab_allowed: ["bookings", "services", "festival packages"] },
+          offer_catalog: [],
+          peer_stats: {},
+          digest: []
+        }
+      };
+
+      const demos = [
+        {
+          label: "IPL match today • SK Pizza Junction",
+          sendAs: "vera",
+          category: baseCategories.restaurants,
+          merchant: {
+            merchant_id: "m_demo_restaurant_001",
+            category_slug: "restaurants",
+            identity: {
+              name: "SK Pizza Junction",
+              owner_first_name: "Suresh",
+              locality: "Sant Nagar",
+              city: "Delhi",
+              languages: ["en", "hi"]
+            },
+            performance: { views_30d: 2200, calls_30d: 38, ctr: 0.02 },
+            offers: [{ id: "off_bogo_pizza", title: "Buy 1 Pizza Get 1 Free", status: "active" }],
+            customer_aggregate: { delivery_orders_30d: 180, dine_in_orders_30d: 95 },
+            review_themes: [{ theme: "late delivery", sentiment: "negative", occurrences_30d: 4, common_quote: "Pizza was tasty but delivery was late." }]
+          },
+          trigger: {
+            id: "trg_demo_ipl_match",
+            scope: "merchant",
+            kind: "ipl_match_today",
+            source: "external",
+            merchant_id: "m_demo_restaurant_001",
+            payload: {
+              match: "DC vs MI",
+              venue: "Arun Jaitley Stadium",
+              city: "Delhi",
+              match_time_iso: "2026-04-26T19:30:00+05:30"
+            },
+            suppression_key: "demo_ipl_m_demo_restaurant_001"
+          }
+        },
+        {
+          label: "Recall due • Dr. Meera Dental",
+          sendAs: "merchant_on_behalf",
+          category: baseCategories.dentists,
+          merchant: {
+            merchant_id: "m_demo_dentist_001",
+            category_slug: "dentists",
+            identity: {
+              name: "Dr. Meera Dental Studio",
+              owner_first_name: "Meera",
+              locality: "Indiranagar",
+              city: "Bengaluru",
+              languages: ["en", "hi"]
+            },
+            offers: [{ id: "off_cleaning_299", title: "Dental Cleaning @ Rs 299 + complimentary fluoride", status: "active" }],
+            customer_aggregate: { recall_due_count: 42, high_risk_adults: 18 }
+          },
+          customer: {
+            customer_id: "c_demo_priya",
+            merchant_id: "m_demo_dentist_001",
+            identity: { name: "Priya", language_pref: "hi-en mix" },
+            preferences: { preferred_slots: "Wed evening, Thu evening" }
+          },
+          trigger: {
+            id: "trg_demo_recall_due",
+            scope: "customer",
+            kind: "recall_due",
+            source: "internal",
+            merchant_id: "m_demo_dentist_001",
+            customer_id: "c_demo_priya",
+            payload: {
+              service_due: "6-month cleaning",
+              due_date: "2026-11-12",
+              available_slots: [
+                { iso: "2026-11-06T18:00:00+05:30", label: "Wed 6 Nov, 6pm" },
+                { iso: "2026-11-07T17:00:00+05:30", label: "Thu 7 Nov, 5pm" }
+              ]
+            },
+            suppression_key: "demo_recall_c_demo_priya"
+          }
+        },
+        {
+          label: "Regulation change • Dental consent",
+          sendAs: "vera",
+          category: baseCategories.dentists,
+          merchant: {
+            merchant_id: "m_demo_dentist_001",
+            category_slug: "dentists",
+            identity: {
+              name: "Dr. Meera Dental Studio",
+              owner_first_name: "Meera",
+              locality: "Indiranagar",
+              city: "Bengaluru",
+              languages: ["en", "hi"]
+            },
+            offers: [{ id: "off_cleaning_299", title: "Dental Cleaning @ Rs 299 + complimentary fluoride", status: "active" }],
+            customer_aggregate: { recall_due_count: 42, high_risk_adults: 18 }
+          },
+          trigger: {
+            id: "trg_demo_regulation",
+            scope: "merchant",
+            kind: "regulation_change",
+            source: "external",
+            merchant_id: "m_demo_dentist_001",
+            payload: {
+              top_item_id: "d_2026W17_dci_radiograph",
+              deadline_iso: "2026-05-01T00:00:00+05:30",
+              affected_batches: ["radiograph consent checklist", "front-desk intake script"]
+            },
+            suppression_key: "demo_regulation_m_demo_dentist_001"
+          }
+        },
+        {
+          label: "Chronic refill due • Apollo Health Plus",
+          sendAs: "merchant_on_behalf",
+          category: baseCategories.pharmacies,
+          merchant: {
+            merchant_id: "m_demo_pharmacy_001",
+            category_slug: "pharmacies",
+            identity: {
+              name: "Apollo Health Plus Pharmacy",
+              owner_first_name: "Ramesh",
+              locality: "Gomti Nagar",
+              city: "Lucknow",
+              languages: ["en", "hi"]
+            },
+            offers: [{ id: "off_free_delivery_rx", title: "Free delivery on chronic Rx refills", status: "active" }],
+            customer_aggregate: { chronic_rx_count: 126, repeat_customers_30d: 74 }
+          },
+          customer: {
+            customer_id: "c_demo_sharma",
+            merchant_id: "m_demo_pharmacy_001",
+            identity: { name: "Mr. Sharma", language_pref: "hi" }
+          },
+          trigger: {
+            id: "trg_demo_refill",
+            scope: "customer",
+            kind: "chronic_refill_due",
+            source: "internal",
+            merchant_id: "m_demo_pharmacy_001",
+            customer_id: "c_demo_sharma",
+            payload: {
+              molecule_list: ["Telmisartan 40mg", "Metformin 500mg"],
+              stock_runs_out_iso: "2026-04-29T08:00:00+05:30",
+              delivery_address_saved: true
+            },
+            suppression_key: "demo_refill_c_demo_sharma"
+          }
+        },
+        {
+          label: "Festival campaign • Studio11 Salon",
+          sendAs: "vera",
+          category: baseCategories.salons,
+          merchant: {
+            merchant_id: "m_demo_salon_001",
+            category_slug: "salons",
+            identity: {
+              name: "Studio11 Salon",
+              owner_first_name: "Lakshmi",
+              locality: "Kapra",
+              city: "Hyderabad",
+              languages: ["en", "hi"]
+            },
+            performance: { views_30d: 3600, calls_30d: 84 },
+            offers: [
+              { id: "off_hair_spa", title: "Hair Spa + Blow Dry", status: "active" },
+              { id: "off_facial", title: "Diwali Glow Facial Package", status: "active" }
+            ],
+            review_themes: [{ theme: "stylist skill", sentiment: "positive", occurrences_30d: 11, common_quote: "Stylist did a clean finish." }]
+          },
+          trigger: {
+            id: "trg_demo_festival",
+            scope: "merchant",
+            kind: "festival_upcoming",
+            source: "external",
+            merchant_id: "m_demo_salon_001",
+            payload: {
+              festival: "Diwali",
+              days_until: 10,
+              high_intent_services: ["facial", "hair spa", "bridal makeup"]
+            },
+            suppression_key: "demo_festival_m_demo_salon_001"
+          }
+        }
+      ];
+
+      const pairSelect = document.getElementById("pairSelect");
+      const merchantName = document.getElementById("merchantName");
+      const triggerKind = document.getElementById("triggerKind");
+      const sendAs = document.getElementById("sendAs");
+      const headerPair = document.getElementById("headerPair");
+      const chat = document.getElementById("chat");
+      const statusBox = document.getElementById("status");
+      const simulateBtn = document.getElementById("simulateBtn");
+      const footerBtn = document.getElementById("footerBtn");
+      const btnText = document.getElementById("btnText");
+
+      function selectedDemo() {
+        return demos[Number(pairSelect.value) || 0];
+      }
+
+      function setStatus(message, tone = "neutral") {
+        const tones = {
+          neutral: "border-slate-200 bg-white text-slate-600",
+          ok: "border-emerald-200 bg-emerald-50 text-emerald-900",
+          error: "border-red-200 bg-red-50 text-red-800",
+          busy: "border-amber-200 bg-amber-50 text-amber-900"
+        };
+        statusBox.className = `border p-3 text-sm ${tones[tone]}`;
+        statusBox.textContent = message;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function bubble({ side, title, body, meta, rationale }) {
+        const align = side === "out" ? "items-end" : "items-start";
+        const color = side === "out" ? "bubble-out bg-[#dcf8c6]" : "bubble-in bg-white";
+        const maxWidth = "max-w-[92%] sm:max-w-[72%]";
+        const rationaleBlock = rationale
+          ? `<div class="mt-2 border-t border-emerald-950/10 pt-2 text-xs leading-5 text-emerald-950/65">${escapeHtml(rationale)}</div>`
+          : "";
+        return `
+          <div class="flex ${align}">
+            <div class="${maxWidth} ${color} px-4 py-3 shadow-sm">
+              ${title ? `<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-emerald-900/70">${escapeHtml(title)}</p>` : ""}
+              <p class="whitespace-pre-wrap text-[15px] leading-6 text-slate-900">${escapeHtml(body)}</p>
+              ${rationaleBlock}
+              ${meta ? `<p class="mt-2 text-right text-[11px] text-slate-500">${escapeHtml(meta)}</p>` : ""}
+            </div>
+          </div>
+        `;
+      }
+
+      function renderInitialChat() {
+        const demo = selectedDemo();
+        chat.innerHTML = [
+          bubble({
+            side: "in",
+            title: "Selected context",
+            body: `${demo.merchant.identity.name}\nTrigger: ${demo.trigger.kind}\nSource: ${demo.trigger.source}`,
+            meta: "ready"
+          })
+        ].join("");
+      }
+
+      function updateDetails() {
+        const demo = selectedDemo();
+        merchantName.textContent = demo.merchant.identity.name;
+        triggerKind.textContent = demo.trigger.kind;
+        sendAs.textContent = demo.sendAs;
+        headerPair.textContent = demo.label;
+        renderInitialChat();
+        setStatus("Context will be bootstrapped before the tick call.", "neutral");
+      }
+
+      async function requestJson(path, payload) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const text = await response.text();
+        let data = {};
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch (error) {
+          throw new Error(`${path} returned invalid JSON: ${text.slice(0, 120)}`);
+        }
+        return { response, data };
+      }
+
+      async function pushContext(scope, contextId, payload) {
+        const { response, data } = await requestJson("/v1/context", {
+          scope,
+          context_id: contextId,
+          version: VERSION,
+          payload,
+          delivered_at: new Date().toISOString()
+        });
+        if (!response.ok && response.status !== 409) {
+          throw new Error(`Failed to load ${scope}/${contextId}: ${JSON.stringify(data)}`);
+        }
+      }
+
+      async function bootstrap(demo) {
+        await pushContext("category", demo.category.slug, demo.category);
+        await pushContext("merchant", demo.merchant.merchant_id, demo.merchant);
+        if (demo.customer) {
+          await pushContext("customer", demo.customer.customer_id, demo.customer);
+        }
+        await pushContext("trigger", demo.trigger.id, demo.trigger);
+      }
+
+      function validateAction(action) {
+        if (!action || !action.body) {
+          throw new Error("The tick response did not include a message body.");
+        }
+        const marker = fallbackMarkers.find((item) => action.body.includes(item) || String(action.rationale || "").includes(item));
+        if (marker) {
+          throw new Error(`Fallback marker detected: ${marker}`);
+        }
+      }
+
+      async function simulateTick() {
+        const demo = selectedDemo();
+        simulateBtn.disabled = true;
+        footerBtn.disabled = true;
+        btnText.textContent = "Running...";
+        setStatus("Loading context and firing /v1/tick...", "busy");
+        renderInitialChat();
+
+        try {
+          await bootstrap(demo);
+          const started = performance.now();
+          const { response, data } = await requestJson("/v1/tick", {
+            now: NOW,
+            available_triggers: [demo.trigger.id]
+          });
+          if (!response.ok) {
+            throw new Error(`/v1/tick failed: ${JSON.stringify(data)}`);
+          }
+          if (!Array.isArray(data.actions) || data.actions.length === 0) {
+            throw new Error("/v1/tick returned no actions.");
+          }
+          const action = data.actions[0];
+          validateAction(action);
+          const elapsed = Math.round(performance.now() - started);
+
+          chat.insertAdjacentHTML(
+            "beforeend",
+            bubble({
+              side: "out",
+              title: "Vera",
+              body: action.body,
+              rationale: action.rationale || "No rationale returned.",
+              meta: `${action.send_as || demo.sendAs} • ${elapsed} ms`
+            })
+          );
+          chat.scrollTop = chat.scrollHeight;
+          setStatus(`Generated one action for ${action.trigger_id || demo.trigger.id}.`, "ok");
+        } catch (error) {
+          chat.insertAdjacentHTML(
+            "beforeend",
+            bubble({
+              side: "in",
+              title: "Error",
+              body: error.message,
+              meta: "request failed"
+            })
+          );
+          setStatus(error.message, "error");
+        } finally {
+          simulateBtn.disabled = false;
+          footerBtn.disabled = false;
+          btnText.textContent = "Simulate Tick";
+        }
+      }
+
+      demos.forEach((demo, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = demo.label;
+        pairSelect.appendChild(option);
+      });
+
+      pairSelect.addEventListener("change", updateDetails);
+      simulateBtn.addEventListener("click", simulateTick);
+      footerBtn.addEventListener("click", simulateTick);
+      updateDetails();
+    </script>
+  </body>
+</html>
