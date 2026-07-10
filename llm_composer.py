@@ -398,15 +398,25 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         category_slug = category.get("slug") or merchant.get("category_slug")
 
         if kind == "research_digest":
-            return self._golden_research_digest(category, merchant, trigger)
+            result = self._golden_research_digest(category, merchant, trigger)
+            if result:
+                return result
         if kind == "festival_upcoming" and category_slug == "salons":
-            return self._golden_festival_salon(merchant, trigger)
+            result = self._golden_festival_salon(merchant, trigger)
+            if result:
+                return result
         if kind == "review_theme_emerged":
-            return self._golden_review_theme(merchant, trigger)
+            result = self._golden_review_theme(merchant, trigger)
+            if result:
+                return result
         if kind == "active_planning_intent" and category_slug == "gyms":
-            return self._golden_gym_planning(merchant, trigger)
+            result = self._golden_gym_planning(merchant, trigger)
+            if result:
+                return result
         if kind == "gbp_unverified":
-            return self._golden_gbp_unverified(merchant, trigger)
+            result = self._golden_gbp_unverified(merchant, trigger)
+            if result:
+                return result
 
         templated = self._template_action(category, merchant, trigger, customer)
         if templated:
