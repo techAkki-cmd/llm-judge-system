@@ -203,13 +203,29 @@
           <div id="chat" class="chat-pattern flex-1 space-y-4 overflow-y-auto p-4 scrollbar-thin sm:p-6"></div>
 
           <footer class="border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">
-            <div class="flex items-center gap-3">
-              <div class="flex-1 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">Vera composes after the selected canonical tick fires.</div>
+            <div class="mb-3 flex flex-wrap gap-2">
+              <button class="presetBtn rounded-full border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 transition hover:bg-red-100" data-message="Stop messaging me, this is spam.">Hostile Opt-Out</button>
+              <button class="presetBtn rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-100" data-message="Can you help me file my GST returns for this month?">GST Curveball</button>
+              <button class="presetBtn rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100" data-message="Thank you for contacting us, we will respond shortly.">Auto-Reply</button>
+              <button class="presetBtn rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100" data-message="Ok, let's do it. What's next?">Intent Transition</button>
+            </div>
+            <div class="flex flex-col gap-3 sm:flex-row">
               <button
                 id="footerBtn"
                 class="bg-[#25d366] px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                Run
+                Simulate Tick
+              </button>
+              <input
+                id="replyInput"
+                class="min-w-0 flex-1 border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 disabled:bg-slate-100"
+                placeholder="Type a merchant reply or use a preset edge case..."
+              />
+              <button
+                id="sendReplyBtn"
+                class="bg-[#075e54] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#064c44] disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Send
               </button>
             </div>
           </footer>
@@ -222,6 +238,9 @@
       const fallbackMarkers = ["LLM timeout fallback", "Stub for", "[LLM COMPOSE STUB]"];
       let demos = [];
       let conversationHistory = [];
+      let currentConversationId = "";
+      let currentRunId = 0;
+      let inputLocked = false;
 
       const pairSelect = document.getElementById("pairSelect");
       const merchantName = document.getElementById("merchantName");
@@ -237,6 +256,9 @@
       const footerBtn = document.getElementById("footerBtn");
       const btnText = document.getElementById("btnText");
       const resetBtn = document.getElementById("resetBtn");
+      const replyInput = document.getElementById("replyInput");
+      const sendReplyBtn = document.getElementById("sendReplyBtn");
+      const presetButtons = document.querySelectorAll(".presetBtn");
       const contextInspector = document.getElementById("contextInspector");
       const teamName = document.getElementById("teamName");
       const modelName = document.getElementById("modelName");
@@ -272,23 +294,88 @@
           .replaceAll("'", "&#039;");
       }
 
-      function bubble({ side, title, body, meta, rationale }) {
+      function routingDetails(intelligence = {}) {
+        const rows = [
+          ["action", intelligence.action],
+          ["cta", intelligence.cta],
+          ["suppression_key", intelligence.suppression_key],
+          ["trigger_id", intelligence.trigger_id],
+          ["merchant_id", intelligence.merchant_id],
+          ["customer_id", intelligence.customer_id],
+          ["rationale", intelligence.rationale]
+        ];
+        const body = rows
+          .map(([key, value]) => `
+            <div class="grid grid-cols-[110px_1fr] gap-2 border-t border-slate-900/10 py-1.5 first:border-t-0">
+              <span class="font-mono text-[10px] uppercase tracking-wide text-slate-500">${escapeHtml(key)}</span>
+              <span class="${key === "rationale" ? "font-serif italic text-slate-700" : "font-mono text-slate-700"} break-words text-[11px]">${escapeHtml(value ?? "none")}</span>
+            </div>
+          `)
+          .join("");
+        return `
+          <details class="mt-2 border-t border-slate-900/10 pt-2">
+            <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-emerald-800/75">Routing Intelligence</summary>
+            <div class="mt-2 rounded bg-white/55 p-2">${body}</div>
+          </details>
+        `;
+      }
+
+      function bubble({ side, title, body, meta, intelligence }) {
         const align = side === "out" ? "items-end" : "items-start";
         const color = side === "out" ? "bubble-out bg-[#dcf8c6]" : "bubble-in bg-white";
         const maxWidth = "max-w-[92%] sm:max-w-[72%]";
-        const rationaleBlock = rationale
-          ? `<div class="mt-2 border-t border-emerald-950/10 pt-2 text-xs leading-5 text-emerald-950/65">${escapeHtml(rationale)}</div>`
-          : "";
         return `
           <div class="flex ${align}">
             <div class="${maxWidth} ${color} px-4 py-3 shadow-sm">
               ${title ? `<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-emerald-900/70">${escapeHtml(title)}</p>` : ""}
               <p class="whitespace-pre-wrap text-[15px] leading-6 text-slate-900">${escapeHtml(body)}</p>
-              ${rationaleBlock}
+              ${routingDetails(intelligence)}
               ${meta ? `<p class="mt-2 text-right text-[11px] text-slate-500">${escapeHtml(meta)}</p>` : ""}
             </div>
           </div>
         `;
+      }
+
+      function systemBubble(message, intelligence = {}) {
+        return `
+          <div class="flex justify-center">
+            <div class="max-w-[92%] border border-slate-300 bg-slate-900/85 px-4 py-3 text-center text-sm text-white shadow-sm sm:max-w-[72%]">
+              <p>${escapeHtml(message)}</p>
+              ${routingDetails(intelligence)}
+            </div>
+          </div>
+        `;
+      }
+
+      function scrollToBottom() {
+        requestAnimationFrame(() => {
+          chat.scrollTop = chat.scrollHeight;
+        });
+      }
+
+      function setReplyEnabled(enabled) {
+        inputLocked = !enabled;
+        replyInput.disabled = !enabled;
+        sendReplyBtn.disabled = !enabled;
+        presetButtons.forEach((button) => {
+          button.disabled = !enabled;
+          button.classList.toggle("opacity-50", !enabled);
+          button.classList.toggle("cursor-not-allowed", !enabled);
+        });
+      }
+
+      function baseIntelligence(overrides = {}) {
+        const demo = selectedDemo();
+        return {
+          action: "context",
+          cta: "none",
+          suppression_key: demo?.trigger?.suppression_key || "none",
+          trigger_id: demo?.trigger_id || "none",
+          merchant_id: demo?.merchant_id || "none",
+          customer_id: demo?.customer_id || "none",
+          rationale: "Dashboard-rendered routing metadata.",
+          ...overrides
+        };
       }
 
       function jsonDetails(title, value, open = false) {
@@ -327,7 +414,11 @@
           side: "in",
           title: "Selected context",
           body: `${demo.merchant.identity.name}\nTrigger: ${demo.trigger.kind}\nSource: ${demo.trigger.source}\nPair: ${demo.test_id}`,
-          meta: "ready"
+          meta: "ready",
+          intelligence: baseIntelligence({
+            action: "selected_context",
+            rationale: "Selected canonical pair; context will be pushed before tick or reply."
+          })
         });
       }
 
@@ -343,6 +434,11 @@
         testId.textContent = demo.test_id;
         merchantId.textContent = demo.merchant_id;
         headerPair.textContent = demo.label;
+        conversationHistory = [];
+        currentConversationId = `ui_${demo.test_id}_${Date.now()}`;
+        currentRunId = 0;
+        replyInput.value = "";
+        setReplyEnabled(true);
         renderContextInspector();
         renderInitialChat();
         setStatus("Context will be bootstrapped before the tick call.", "neutral");
@@ -435,6 +531,7 @@
       }
 
       async function bootstrap(demo, runId) {
+        currentRunId = runId;
         const version = Number(String(runId).slice(-10));
         const payloads = cloneForDemo(demo, runId);
         await pushContext("category", payloads.category.slug, payloads.category, version);
@@ -483,6 +580,7 @@
           const action = data.actions[0];
           validateAction(action);
           const elapsed = Math.round(performance.now() - started);
+          currentConversationId = action.conversation_id || currentConversationId || `ui_${demo.test_id}_${runId}`;
           conversationHistory.push({ from: "vera", msg: action.body, action, elapsed_ms: elapsed });
 
           chat.insertAdjacentHTML(
@@ -491,11 +589,11 @@
               side: "out",
               title: "Vera",
               body: action.body,
-              rationale: action.rationale || "No rationale returned.",
+              intelligence: baseIntelligence(action),
               meta: `${action.send_as || demo.send_as} · ${elapsed} ms`
             })
           );
-          chat.scrollTop = chat.scrollHeight;
+          scrollToBottom();
           setStatus(`Generated one action for ${demo.test_id} / ${action.trigger_id || demo.trigger_id}.`, "ok");
           await refreshHealth();
         } catch (error) {
@@ -505,9 +603,14 @@
               side: "in",
               title: "Error",
               body: error.message,
+              intelligence: baseIntelligence({
+                action: "error",
+                rationale: error.message
+              }),
               meta: "request failed"
             })
           );
+          scrollToBottom();
           setStatus(error.message, "error");
         } finally {
           simulateBtn.disabled = false;
@@ -526,12 +629,128 @@
           }
           chat.innerHTML = "";
           conversationHistory = [];
+          currentConversationId = "";
+          currentRunId = 0;
+          replyInput.value = "";
+          setReplyEnabled(true);
           setStatus(data.message || "State cleared.", "ok");
           await refreshHealth();
         } catch (error) {
           setStatus(error.message, "error");
         } finally {
           resetBtn.disabled = false;
+        }
+      }
+
+      async function sendReply() {
+        const demo = selectedDemo();
+        const message = replyInput.value.trim();
+        if (!demo || !message || inputLocked) {
+          return;
+        }
+
+        const runId = currentRunId || Date.now();
+        currentConversationId = currentConversationId || `ui_${demo.test_id}_${runId}`;
+        sendReplyBtn.disabled = true;
+        replyInput.disabled = true;
+        setStatus(`Sending reactive turn to /v1/reply for ${demo.test_id}...`, "busy");
+
+        try {
+          await bootstrap(demo, runId);
+          const turnNumber = conversationHistory.length + 1;
+          const payload = {
+            conversation_id: currentConversationId,
+            merchant_id: demo.merchant_id,
+            customer_id: demo.customer_id || null,
+            from_role: "merchant",
+            message,
+            received_at: new Date().toISOString(),
+            turn_number: turnNumber
+          };
+          conversationHistory.push({ from: "merchant", msg: message, payload });
+          chat.insertAdjacentHTML(
+            "beforeend",
+            bubble({
+              side: "out",
+              title: "Merchant reply",
+              body: message,
+              intelligence: baseIntelligence({
+                action: "incoming_turn",
+                cta: "none",
+                rationale: "Payload sent to /v1/reply.",
+                ...payload
+              }),
+              meta: `turn ${turnNumber}`
+            })
+          );
+          scrollToBottom();
+          replyInput.value = "";
+
+          const started = performance.now();
+          const { response, data } = await requestJson("/v1/reply", payload);
+          const elapsed = Math.round(performance.now() - started);
+          if (!response.ok) {
+            throw new Error(`/v1/reply failed: ${JSON.stringify(data)}`);
+          }
+
+          const action = data.action || "send";
+          conversationHistory.push({ from: "vera", msg: data.body || action, action: data, elapsed_ms: elapsed });
+          const intelligence = baseIntelligence({
+            ...data,
+            trigger_id: demo.trigger_id,
+            merchant_id: demo.merchant_id,
+            customer_id: demo.customer_id || null,
+            suppression_key: demo.trigger.suppression_key || "none"
+          });
+
+          if (action === "end") {
+            chat.insertAdjacentHTML(
+              "beforeend",
+              systemBubble("🔒 System: Conversation Guard triggered 'END'. Session terminated.", intelligence)
+            );
+            setReplyEnabled(false);
+          } else if (action === "wait") {
+            chat.insertAdjacentHTML(
+              "beforeend",
+              systemBubble("⏳ System: Auto-reply escalation triggered 'WAIT'. Backing off.", intelligence)
+            );
+            setReplyEnabled(true);
+          } else {
+            chat.insertAdjacentHTML(
+              "beforeend",
+              bubble({
+                side: "out",
+                title: "Vera",
+                body: data.body || "No message body returned.",
+                intelligence,
+                meta: `reply guard · ${elapsed} ms`
+              })
+            );
+            setReplyEnabled(true);
+          }
+
+          scrollToBottom();
+          setStatus(`/v1/reply returned action "${action}" for ${demo.test_id}.`, "ok");
+          await refreshHealth();
+        } catch (error) {
+          chat.insertAdjacentHTML(
+            "beforeend",
+            bubble({
+              side: "in",
+              title: "Error",
+              body: error.message,
+              intelligence: baseIntelligence({
+                action: "error",
+                rationale: error.message
+              }),
+              meta: "reply failed"
+            })
+          );
+          scrollToBottom();
+          setStatus(error.message, "error");
+          if (!inputLocked) {
+            setReplyEnabled(true);
+          }
         }
       }
 
@@ -564,6 +783,19 @@
       simulateBtn.addEventListener("click", simulateTick);
       footerBtn.addEventListener("click", simulateTick);
       resetBtn.addEventListener("click", resetSystemState);
+      sendReplyBtn.addEventListener("click", sendReply);
+      replyInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendReply();
+        }
+      });
+      presetButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          replyInput.value = button.dataset.message || "";
+          replyInput.focus();
+        });
+      });
       runtimeHost.textContent = window.location.host || "local runtime";
       loadMetadata();
       refreshHealth();
