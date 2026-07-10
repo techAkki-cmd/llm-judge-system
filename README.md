@@ -51,6 +51,7 @@ The backend is split into three decoupled layers:
 
 * **Creativity vs. Compliance:** The canonical challenge paths favor deterministic templating over unconstrained generation. This prevents fabricated claims, preserves exact context facts, and keeps CTA behavior predictable.
 * **In-Memory Volatility vs. Speed:** State is stored in memory using Python dictionaries protected by `asyncio.Lock`. This is appropriate for the challenge runner and enables very fast reads/writes. In a horizontally scaled production system, this layer should move to Redis or another external state store.
+* **Synchronous HTTP vs. Event-Driven Messaging:** The testing brief required synchronous REST endpoints such as `POST /v1/tick`. In a true production environment handling high-scale orchestration, proactive trigger evaluation would be decoupled using a message broker such as RabbitMQ or Kafka to prevent HTTP blocking and ensure stronger fault tolerance. This architecture stays synchronous strictly to comply with the judge's automated HTTP polling harness.
 * **Single Worker vs. Horizontal Scaling:** The deployed container intentionally runs one Uvicorn worker so the in-memory state remains coherent. Scaling this architecture without Redis would split state across processes and break idempotency/suppression semantics.
 
 ## Endpoint Specification
