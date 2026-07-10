@@ -51,18 +51,18 @@
       <section class="grid gap-3 border border-white/10 bg-slate-950/70 p-3 shadow-2xl backdrop-blur md:grid-cols-[1.1fr_1.6fr_1.2fr]">
         <div class="border border-white/10 bg-slate-900/80 p-4">
           <p class="text-xs uppercase tracking-[0.22em] text-emerald-300">Runtime metadata</p>
-          <div class="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3 md:grid-cols-1 xl:grid-cols-3">
+          <div class="mt-3 grid grid-cols-1 gap-3 text-sm lg:grid-cols-[0.75fr_1.15fr_1.4fr]">
             <div>
               <p class="text-slate-500">Team</p>
-              <p id="teamName" class="mt-1 font-semibold text-white">Loading...</p>
+              <p id="teamName" class="mt-1 break-words font-semibold text-white">Loading...</p>
             </div>
             <div>
               <p class="text-slate-500">Model</p>
-              <p id="modelName" class="mt-1 font-semibold text-white">Loading...</p>
+              <p id="modelName" class="mt-1 break-words font-semibold leading-6 text-white">Loading...</p>
             </div>
             <div>
               <p class="text-slate-500">Approach</p>
-              <p id="approach" class="mt-1 font-semibold text-white">Loading...</p>
+              <p id="approach" class="mt-1 break-words font-semibold leading-6 text-white">Loading...</p>
             </div>
           </div>
         </div>
@@ -196,7 +196,7 @@
             </div>
             <div class="hidden text-right text-xs text-white/75 sm:block">
               <p id="headerPair"></p>
-              <p>localhost:8080</p>
+              <p id="runtimeHost">loading host</p>
             </div>
           </header>
 
@@ -246,6 +246,7 @@
       const healthMerchants = document.getElementById("healthMerchants");
       const healthCustomers = document.getElementById("healthCustomers");
       const healthTriggers = document.getElementById("healthTriggers");
+      const runtimeHost = document.getElementById("runtimeHost");
 
       function selectedDemo() {
         return demos[Number(pairSelect.value) || 0];
@@ -563,6 +564,7 @@
       simulateBtn.addEventListener("click", simulateTick);
       footerBtn.addEventListener("click", simulateTick);
       resetBtn.addEventListener("click", resetSystemState);
+      runtimeHost.textContent = window.location.host || "local runtime";
       loadMetadata();
       refreshHealth();
       setInterval(refreshHealth, 5000);
