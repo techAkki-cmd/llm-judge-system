@@ -281,20 +281,3 @@ Important files:
 * `static/index.html` - System Architect Dashboard and WhatsApp simulator.
 * `Dockerfile` - Single-worker production container.
 
-## Submission Readiness Checklist
-
-Before final submission:
-
-```bash
-python -m py_compile main.py schemas.py state_store.py conversation_guard.py llm_composer.py validator.py
-python generate_submission.py
-wc -l submission.jsonl
-curl http://localhost:8080/v1/healthz
-```
-
-Expected:
-
-* `submission.jsonl` has exactly 30 lines.
-* No generated response contains `Stub for`, `[LLM COMPOSE STUB]`, `LLM timeout fallback`, or placeholder context text.
-* `/v1/healthz` responds with `status: ok`.
-* Public demo loads at [http://13.50.235.17](http://13.50.235.17).
