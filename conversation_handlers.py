@@ -5,6 +5,19 @@ from typing import Any
 from conversation_guard import ConversationGuard
 
 
+def respond(state: Any, merchant_message: str) -> dict[str, Any]:
+    """Challenge-brief compatible wrapper for multi-turn reply handling.
+
+    The static brief describes a `respond(state, merchant_message)` entrypoint.
+    This adapter accepts either a dict-like state or an object with matching
+    attributes, then delegates to the same deterministic guard used by FastAPI.
+    """
+    merchant = _state_get(state, "merchant", {}) or {}
+    customer = _state_get(state, "customer", None)
+    history = _state_get(state, "history", []) or _state_get(state, "conversation_history", []) or []
+    return handle_reply(merchant, customer, merchant_message, history)
+
+
 def handle_reply(
     merchant: dict[str, Any],
     customer: dict[str, Any] | None,
@@ -49,3 +62,9 @@ def _next_turn_number(history: list[dict[str, Any]]) -> int:
         if isinstance(turn, dict) and str(turn.get("turn", "")).isdigit()
     ]
     return (max(turns) + 1) if turns else 1
+
+
+def _state_get(state: Any, key: str, default: Any) -> Any:
+    if isinstance(state, dict):
+        return state.get(key, default)
+    return getattr(state, key, default)
