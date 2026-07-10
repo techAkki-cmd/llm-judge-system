@@ -104,6 +104,12 @@
           >
             Reset System State
           </button>
+          <button
+            id="raceBtn"
+            class="mt-3 w-full border border-amber-300/40 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Simulate Race Condition (Stale Push)
+          </button>
         </div>
       </section>
 
@@ -114,16 +120,16 @@
               <div class="grid h-11 w-11 place-items-center rounded bg-emerald-700 text-lg font-bold text-white">V</div>
               <div>
                 <h1 class="text-xl font-semibold tracking-tight text-white">Vera System Dashboard</h1>
-                <p class="text-sm text-slate-400">30 canonical magicpin pairs</p>
+                <p class="text-sm text-slate-400">30 canonical pairs + 100 expanded triggers</p>
               </div>
             </div>
           </div>
 
           <div class="space-y-5 overflow-y-auto p-5 scrollbar-thin">
             <label class="block">
-              <span class="mb-2 block text-sm font-medium text-slate-300">Canonical test pair</span>
+              <span class="mb-2 block text-sm font-medium text-slate-300">Trigger dataset selector</span>
               <select id="pairSelect" class="w-full border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20">
-                <option>Loading T01-T30...</option>
+                <option>Loading canonical and expanded triggers...</option>
               </select>
             </label>
 
@@ -156,6 +162,12 @@
               class="flex w-full items-center justify-center gap-2 bg-emerald-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
               <span id="btnText">Simulate Tick</span>
+            </button>
+            <button
+              id="batchBtn"
+              class="flex w-full items-center justify-center gap-2 border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Simulate 5-Trigger Batch
             </button>
 
             <div id="status" class="border border-white/10 bg-slate-950/60 p-3 text-sm text-slate-300">
@@ -241,6 +253,7 @@
       let currentConversationId = "";
       let currentRunId = 0;
       let inputLocked = false;
+      let selectedPayloads = null;
 
       const pairSelect = document.getElementById("pairSelect");
       const merchantName = document.getElementById("merchantName");
@@ -254,8 +267,10 @@
       const statusBox = document.getElementById("status");
       const simulateBtn = document.getElementById("simulateBtn");
       const footerBtn = document.getElementById("footerBtn");
+      const batchBtn = document.getElementById("batchBtn");
       const btnText = document.getElementById("btnText");
       const resetBtn = document.getElementById("resetBtn");
+      const raceBtn = document.getElementById("raceBtn");
       const replyInput = document.getElementById("replyInput");
       const sendReplyBtn = document.getElementById("sendReplyBtn");
       const presetButtons = document.querySelectorAll(".presetBtn");
@@ -336,10 +351,16 @@
         `;
       }
 
-      function systemBubble(message, intelligence = {}) {
+      function systemBubble(message, intelligence = {}, tone = "neutral") {
+        const toneClass = {
+          neutral: "border-slate-300 bg-slate-900/85 text-white",
+          error: "border-red-300 bg-red-950/90 text-red-50",
+          warn: "border-amber-300 bg-amber-950/90 text-amber-50",
+          muted: "border-slate-300 bg-slate-700/90 text-slate-50"
+        }[tone] || "border-slate-300 bg-slate-900/85 text-white";
         return `
           <div class="flex justify-center">
-            <div class="max-w-[92%] border border-slate-300 bg-slate-900/85 px-4 py-3 text-center text-sm text-white shadow-sm sm:max-w-[72%]">
+            <div class="max-w-[92%] border ${toneClass} px-4 py-3 text-center text-sm shadow-sm sm:max-w-[72%]">
               <p>${escapeHtml(message)}</p>
               ${routingDetails(intelligence)}
             </div>
@@ -437,6 +458,7 @@
         conversationHistory = [];
         currentConversationId = `ui_${demo.test_id}_${Date.now()}`;
         currentRunId = 0;
+        selectedPayloads = null;
         replyInput.value = "";
         setReplyEnabled(true);
         renderContextInspector();
@@ -521,7 +543,6 @@
 
       function cloneForDemo(demo, runId) {
         const trigger = structuredClone(demo.trigger);
-        trigger.suppression_key = `${trigger.suppression_key || trigger.id}_ui_${runId}`;
         return {
           category: structuredClone(demo.category),
           merchant: structuredClone(demo.merchant),
@@ -540,6 +561,8 @@
           await pushContext("customer", payloads.customer.customer_id, payloads.customer, version);
         }
         await pushContext("trigger", payloads.trigger.id, payloads.trigger, version);
+        selectedPayloads = payloads;
+        return payloads;
       }
 
       function validateAction(action) {
@@ -560,8 +583,9 @@
         const runId = Date.now();
         simulateBtn.disabled = true;
         footerBtn.disabled = true;
+        batchBtn.disabled = true;
         btnText.textContent = "Running...";
-        setStatus(`Loading ${demo.test_id} context and firing /v1/tick...`, "busy");
+        setStatus(`Vera is evaluating triggers for ${demo.test_id}...`, "busy");
         renderInitialChat();
 
         try {
@@ -575,47 +599,224 @@
             throw new Error(`/v1/tick failed: ${JSON.stringify(data)}`);
           }
           if (!Array.isArray(data.actions) || data.actions.length === 0) {
-            throw new Error("/v1/tick returned no actions.");
+            chat.insertAdjacentHTML(
+              "beforeend",
+              systemBubble(
+                "🔒 System: 0 actions generated. Triggers skipped due to active suppression deduplication or backoff.",
+                baseIntelligence({
+                  action: "suppressed",
+                  rationale: "The backend returned an empty actions array for this tick request."
+                }),
+                "muted"
+              )
+            );
+            scrollToBottom();
+            setStatus("0 actions returned. Suppression/backoff path visualized.", "ok");
+            await refreshHealth();
+            return;
           }
-          const action = data.actions[0];
-          validateAction(action);
           const elapsed = Math.round(performance.now() - started);
-          currentConversationId = action.conversation_id || currentConversationId || `ui_${demo.test_id}_${runId}`;
-          conversationHistory.push({ from: "vera", msg: action.body, action, elapsed_ms: elapsed });
 
-          chat.insertAdjacentHTML(
-            "beforeend",
-            bubble({
-              side: "out",
-              title: "Vera",
-              body: action.body,
-              intelligence: baseIntelligence(action),
-              meta: `${action.send_as || demo.send_as} · ${elapsed} ms`
-            })
-          );
+          data.actions.forEach((action, index) => {
+            if (action.action === "send" || !action.action) {
+              validateAction(action);
+            }
+            currentConversationId = action.conversation_id || currentConversationId || `ui_${demo.test_id}_${runId}`;
+            conversationHistory.push({ from: "vera", msg: action.body || action.action, action, elapsed_ms: elapsed });
+            if (action.action === "wait") {
+              chat.insertAdjacentHTML(
+                "beforeend",
+                systemBubble("⏳ System: Tick returned 'WAIT'. Backing off.", baseIntelligence(action), "warn")
+              );
+            } else if (action.action === "end") {
+              chat.insertAdjacentHTML(
+                "beforeend",
+                systemBubble("🔒 System: Tick returned 'END'. No outbound send created.", baseIntelligence(action), "muted")
+              );
+            } else {
+              chat.insertAdjacentHTML(
+                "beforeend",
+                bubble({
+                  side: "out",
+                  title: `Vera action ${index + 1}/${data.actions.length}`,
+                  body: action.body,
+                  intelligence: baseIntelligence(action),
+                  meta: `${action.send_as || demo.send_as} · ${elapsed} ms`
+                })
+              );
+            }
+          });
           scrollToBottom();
-          setStatus(`Generated one action for ${demo.test_id} / ${action.trigger_id || demo.trigger_id}.`, "ok");
+          setStatus(`Generated ${data.actions.length} action(s) for ${demo.test_id}.`, "ok");
           await refreshHealth();
         } catch (error) {
           chat.insertAdjacentHTML(
             "beforeend",
-            bubble({
-              side: "in",
-              title: "Error",
-              body: error.message,
-              intelligence: baseIntelligence({
+            systemBubble(
+              `⚠️ Network/System Error: ${error.message}`,
+              baseIntelligence({
                 action: "error",
                 rationale: error.message
               }),
-              meta: "request failed"
-            })
+              "error"
+            )
           );
           scrollToBottom();
           setStatus(error.message, "error");
         } finally {
           simulateBtn.disabled = false;
           footerBtn.disabled = false;
+          batchBtn.disabled = false;
           btnText.textContent = "Simulate Tick";
+        }
+      }
+
+      async function simulateBatchTick() {
+        const selected = selectedDemo();
+        if (!selected) {
+          return;
+        }
+        const start = Math.max(0, Number(pairSelect.value) || 0);
+        const batch = demos.slice(start, start + 5);
+        const runId = Date.now();
+        simulateBtn.disabled = true;
+        footerBtn.disabled = true;
+        batchBtn.disabled = true;
+        setStatus(`Vera is evaluating ${batch.length} triggers as a batch...`, "busy");
+        renderInitialChat();
+        try {
+          const triggerIds = [];
+          for (const demo of batch) {
+            await bootstrap(demo, runId);
+            triggerIds.push(demo.trigger_id);
+          }
+          const started = performance.now();
+          const { response, data } = await requestJson("/v1/tick", {
+            now: NOW,
+            available_triggers: triggerIds
+          });
+          if (!response.ok) {
+            throw new Error(`/v1/tick batch failed: ${JSON.stringify(data)}`);
+          }
+          if (!Array.isArray(data.actions) || data.actions.length === 0) {
+            chat.insertAdjacentHTML(
+              "beforeend",
+              systemBubble(
+                "🔒 System: 0 actions generated. Triggers skipped due to active suppression deduplication or backoff.",
+                baseIntelligence({
+                  action: "suppressed",
+                  rationale: `Batch request sent ${triggerIds.length} trigger(s), backend returned no actions.`
+                }),
+                "muted"
+              )
+            );
+            scrollToBottom();
+            setStatus("Batch returned 0 actions. Suppression/backoff path visualized.", "ok");
+            await refreshHealth();
+            return;
+          }
+          const elapsed = Math.round(performance.now() - started);
+          data.actions.forEach((action, index) => {
+            if (action.action === "send" || !action.action) {
+              validateAction(action);
+            }
+            currentConversationId = action.conversation_id || currentConversationId || `ui_batch_${runId}`;
+            conversationHistory.push({ from: "vera", msg: action.body || action.action, action, elapsed_ms: elapsed });
+            if (action.action === "wait") {
+              chat.insertAdjacentHTML(
+                "beforeend",
+                systemBubble("⏳ System: Tick returned 'WAIT'. Backing off.", baseIntelligence(action), "warn")
+              );
+            } else if (action.action === "end") {
+              chat.insertAdjacentHTML(
+                "beforeend",
+                systemBubble("🔒 System: Tick returned 'END'. No outbound send created.", baseIntelligence(action), "muted")
+              );
+            } else {
+              chat.insertAdjacentHTML(
+                "beforeend",
+                bubble({
+                  side: "out",
+                  title: `Batch action ${index + 1}/${data.actions.length}`,
+                  body: action.body,
+                  intelligence: baseIntelligence(action),
+                  meta: `${action.send_as || "vera"} · ${elapsed} ms`
+                })
+              );
+            }
+          });
+          scrollToBottom();
+          setStatus(`Batch generated ${data.actions.length} action(s) from ${triggerIds.length} trigger(s).`, "ok");
+          await refreshHealth();
+        } catch (error) {
+          chat.insertAdjacentHTML(
+            "beforeend",
+            systemBubble(
+              `⚠️ Network/System Error: ${error.message}`,
+              baseIntelligence({ action: "error", rationale: error.message }),
+              "error"
+            )
+          );
+          scrollToBottom();
+          setStatus(error.message, "error");
+        } finally {
+          simulateBtn.disabled = false;
+          footerBtn.disabled = false;
+          batchBtn.disabled = false;
+        }
+      }
+
+      async function simulateStalePush() {
+        const demo = selectedDemo();
+        if (!demo) {
+          return;
+        }
+        raceBtn.disabled = true;
+        setStatus("Simulating stale context push against /v1/context...", "busy");
+        try {
+          await bootstrap(demo, Date.now());
+          const stalePayload = structuredClone((selectedPayloads || {}).merchant || demo.merchant);
+          stalePayload.identity = { ...(stalePayload.identity || {}), stale_demo_marker: "old_version_write" };
+          const { response, data } = await requestJson("/v1/context", {
+            scope: "merchant",
+            context_id: demo.merchant_id,
+            version: 1,
+            payload: stalePayload,
+            delivered_at: new Date().toISOString()
+          });
+          if (response.status === 409) {
+            chat.insertAdjacentHTML(
+              "beforeend",
+              systemBubble(
+                "⚠️ System Guard: Blocked stale context push (409 Conflict). Idempotent state protected.",
+                baseIntelligence({
+                  action: "stale_version_blocked",
+                  cta: "none",
+                  merchant_id: demo.merchant_id,
+                  rationale: JSON.stringify(data)
+                }),
+                "error"
+              )
+            );
+            scrollToBottom();
+            setStatus("409 Conflict confirmed. Idempotent state protected.", "ok");
+            await refreshHealth();
+            return;
+          }
+          throw new Error(`Expected 409, got HTTP ${response.status}: ${JSON.stringify(data)}`);
+        } catch (error) {
+          chat.insertAdjacentHTML(
+            "beforeend",
+            systemBubble(
+              `⚠️ Race condition demo failed: ${error.message}`,
+              baseIntelligence({ action: "error", rationale: error.message }),
+              "error"
+            )
+          );
+          scrollToBottom();
+          setStatus(error.message, "error");
+        } finally {
+          raceBtn.disabled = false;
         }
       }
 
@@ -631,6 +832,7 @@
           conversationHistory = [];
           currentConversationId = "";
           currentRunId = 0;
+          selectedPayloads = null;
           replyInput.value = "";
           setReplyEnabled(true);
           setStatus(data.message || "State cleared.", "ok");
@@ -671,7 +873,7 @@
           chat.insertAdjacentHTML(
             "beforeend",
             bubble({
-              side: "out",
+              side: "in",
               title: "Merchant reply",
               body: message,
               intelligence: baseIntelligence({
@@ -756,25 +958,47 @@
 
       async function loadDemoPairs() {
         try {
-          const response = await fetch("/static/demo_pairs.json", { cache: "no-store" });
-          if (!response.ok) {
-            throw new Error(`Unable to load /static/demo_pairs.json: HTTP ${response.status}`);
+          const [canonicalResponse, expandedResponse] = await Promise.all([
+            fetch("/static/demo_pairs.json", { cache: "no-store" }),
+            fetch("/static/expanded_triggers.json", { cache: "no-store" })
+          ]);
+          if (!canonicalResponse.ok) {
+            throw new Error(`Unable to load /static/demo_pairs.json: HTTP ${canonicalResponse.status}`);
           }
-          const data = await response.json();
-          demos = Array.isArray(data.pairs) ? data.pairs : [];
-          if (demos.length !== 30) {
-            throw new Error(`Expected 30 demo pairs, found ${demos.length}`);
+          if (!expandedResponse.ok) {
+            throw new Error(`Unable to load /static/expanded_triggers.json: HTTP ${expandedResponse.status}`);
           }
+          const canonicalData = await canonicalResponse.json();
+          const expandedData = await expandedResponse.json();
+          const canonical = Array.isArray(canonicalData.pairs) ? canonicalData.pairs : [];
+          const expanded = Array.isArray(expandedData.pairs) ? expandedData.pairs : [];
+          if (canonical.length !== 30) {
+            throw new Error(`Expected 30 canonical demo pairs, found ${canonical.length}`);
+          }
+          if (expanded.length !== 100) {
+            throw new Error(`Expected 100 expanded triggers, found ${expanded.length}`);
+          }
+          demos = [...canonical, ...expanded];
           pairSelect.innerHTML = "";
+          const canonicalGroup = document.createElement("optgroup");
+          canonicalGroup.label = "Canonical judge pairs (30)";
+          const expandedGroup = document.createElement("optgroup");
+          expandedGroup.label = "Expanded trigger coverage (100)";
           demos.forEach((demo, index) => {
             const option = document.createElement("option");
             option.value = String(index);
             option.textContent = demo.label;
-            pairSelect.appendChild(option);
+            if (index < canonical.length) {
+              canonicalGroup.appendChild(option);
+            } else {
+              expandedGroup.appendChild(option);
+            }
           });
+          pairSelect.appendChild(canonicalGroup);
+          pairSelect.appendChild(expandedGroup);
           updateDetails();
         } catch (error) {
-          pairSelect.innerHTML = "<option>Failed to load demo pairs</option>";
+          pairSelect.innerHTML = "<option>Failed to load trigger datasets</option>";
           setStatus(error.message, "error");
         }
       }
@@ -782,7 +1006,9 @@
       pairSelect.addEventListener("change", updateDetails);
       simulateBtn.addEventListener("click", simulateTick);
       footerBtn.addEventListener("click", simulateTick);
+      batchBtn.addEventListener("click", simulateBatchTick);
       resetBtn.addEventListener("click", resetSystemState);
+      raceBtn.addEventListener("click", simulateStalePush);
       sendReplyBtn.addEventListener("click", sendReply);
       replyInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
