@@ -394,6 +394,7 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
             return None
 
         kind = trigger.get("kind")
+        kind_text = str(kind or "")
         payload = trigger.get("payload", {}) or {}
         category_slug = category.get("slug") or merchant.get("category_slug")
 
@@ -949,6 +950,7 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         self, category: dict, merchant: dict, trigger: dict, customer: dict | None
     ) -> dict | None:
         kind = trigger.get("kind")
+        kind_text = str(kind or "")
         payload = trigger.get("payload", {}) or {}
 
         if customer:
@@ -970,6 +972,10 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
 
         if kind == "research_digest" or payload.get("metric_or_topic") == "research_digest":
             return self._template_research_digest(category, merchant, trigger)
+        if kind == "corporate_thali_planning" or payload.get("intent_topic") == "corporate_bulk_thali_package":
+            return self._template_corporate_thali_planning(merchant, trigger)
+        if kind_text.startswith("festival_upcoming") or payload.get("metric_or_topic") == "festival_upcoming":
+            return self._template_festival_upcoming_generic(category, merchant, trigger)
         if kind == "competitor_opened":
             return self._template_competitor_opened(merchant, trigger)
         if kind == "curious_ask_due":
@@ -1141,6 +1147,64 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
             "Want me to pull a 2-min abstract and draft the customer WhatsApp from it?"
         )
         return self._send_route(body, "natural_question", "vera", "Merchant research digest template using category digest and merchant context.")
+
+    def _template_festival_upcoming_generic(
+        self, category: dict, merchant: dict, trigger: dict
+    ) -> dict:
+        payload = trigger.get("payload", {}) or {}
+        owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
+        category_name = (
+            category.get("display_name")
+            or category.get("slug")
+            or merchant.get("category_slug")
+            or "category"
+        )
+        festival = (
+            payload.get("festival_name")
+            or payload.get("festival")
+            or payload.get("name")
+            or "the upcoming festival"
+        )
+        active_offer = self._first_active_offer(merchant)
+        offer_text = f" around {active_offer}" if active_offer else ""
+        stat = self._merchant_context_anchor(merchant)
+        body = (
+            f"{owner}, {festival} is a timely seasonal moment for {business} in {locality}. "
+            f"Your {str(category_name).replace('_', ' ')} context shows {stat}, so a festival promo draft{offer_text} can capture intent before nearby competitors do. "
+            "Reply YES and I will draft the seasonal promo message now, or STOP."
+        )
+        return self._send_route(
+            body,
+            "binary_yes_stop",
+            "vera",
+            "Merchant festival template using seasonal trigger, merchant locality, and available offer context.",
+        )
+
+    def _template_corporate_thali_planning(self, merchant: dict, trigger: dict) -> dict:
+        payload = trigger.get("payload", {}) or {}
+        owner = self._owner_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
+        last_message = payload.get("merchant_last_message")
+        last_message_text = (
+            f" You said '{last_message}', so this is ready to turn into copy."
+            if last_message
+            else ""
+        )
+        body = (
+            f"{owner}, I see a spike in corporate thali planning searches near {locality}. "
+            f"Let's push a bulk-order discount to capture this office crowd.{last_message_text} "
+            "Want me to draft the Swiggy/Zomato banner text?"
+        )
+        return self._send_route(
+            body,
+            "open_ended",
+            "vera",
+            "Merchant corporate thali planning template using locality and bulk-order intent.",
+        )
 
     def _template_wedding_followup(self, merchant: dict, trigger: dict, customer: dict) -> dict:
         payload = trigger.get("payload", {}) or {}

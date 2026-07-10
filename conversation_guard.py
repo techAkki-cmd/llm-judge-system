@@ -6,6 +6,9 @@ from state_store import merchant_auto_replies
 
 
 class ConversationGuard:
+    CANNED_AUTO_REPLY_RE = re.compile(
+        r"(?i)(thank you for contacting|will respond|business hours|automated reply|out of office|get back to you shortly|we have received your message)"
+    )
     HOSTILE_OPT_OUT_RE = re.compile(
         r"(?i)\b(stop|spam|useless|don'?t message|unsubscribe|not interested)\b"
     )
@@ -27,6 +30,14 @@ class ConversationGuard:
         self.intent_actioned = False
 
     def route(self) -> dict[str, Any]:
+        if self.CANNED_AUTO_REPLY_RE.search(self.message):
+            return {
+                "action": "send",
+                "body": "It looks like an auto-responder is on. Let me know when you are back to review the campaign!",
+                "cta": "open_ended",
+                "rationale": "Proactively detected standard auto-responder phrasing on first turn. Sent prompt to human.",
+            }
+
         auto_reply_count = self._merchant_auto_reply_count()
         if auto_reply_count == 1:
             return {
