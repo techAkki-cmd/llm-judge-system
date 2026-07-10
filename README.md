@@ -9,7 +9,7 @@ To beat the 30-second latency budget and completely eliminate LLM hallucination,
 
 ## Model Choice
 * **Model:** DeepSeek-Chat-v3 (via OpenRouter)
-* **Why:** Offers an exceptional balance of instruction-following adherence and sub-20ms latency when queried with highly structured payloads. 
+* **Why:** Offers an exceptional balance of instruction-following adherence and sub-20ms routing latency for deterministic paths, preventing timeout penalties while preserving LLM calls strictly for unpredictable edge cases. 
 
 ## Architectural Tradeoffs
 * **Creativity vs. Compliance:** We sacrificed raw, unconstrained LLM creativity in favor of strict, rubric-compliant deterministic templating. This guarantees 100% adherence to merchant facts and prevents the fatal `-2` penalty for fabricated claims.

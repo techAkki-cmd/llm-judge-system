@@ -30,14 +30,21 @@ class ConversationGuard:
         auto_reply_count = self._merchant_auto_reply_count()
         if auto_reply_count == 1:
             return {
+                "action": "send",
+                "body": "It looks like an auto-responder is on. Let me know when you are back to review the campaign!",
+                "cta": "open_ended",
+                "rationale": "Detected first auto-reply. Sent prompt to human.",
+            }
+        if auto_reply_count == 2:
+            return {
                 "action": "wait",
                 "wait_seconds": 14400,
-                "rationale": "Detected merchant auto-reply. Backing off 4 hours to wait for owner.",
+                "rationale": "Detected second auto-reply. Backing off.",
             }
-        if auto_reply_count >= 2:
+        if auto_reply_count >= 3:
             return {
                 "action": "end",
-                "rationale": "Auto-reply 3x in a row, no real reply. Conversation has zero engagement signal; closing.",
+                "rationale": "Detected persistent auto-reply loop. Terminating.",
             }
 
         if self.HOSTILE_OPT_OUT_RE.search(self.message):
