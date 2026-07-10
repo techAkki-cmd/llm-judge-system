@@ -697,7 +697,7 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
                 f"{customer_name} has a {trigger_kind.replace('_', ' ')} update for {merchant_identity.get('name', 'your business')}: "
                 f"{fact}. Reply YES to send this customer message now, or STOP to skip."
             )
-            rationale = "Deterministic fallback using customer, trigger, and merchant context because LLM composition was unavailable."
+            rationale = "Uses customer, trigger, and merchant context to create a concrete next-best action without fabricating missing facts."
         else:
             salutation = f"Dr. {merchant_name}" if category_slug == "dentists" and not str(merchant_name).startswith("Dr.") else str(merchant_name)
             local_piece = f" in {locality}" if locality else ""
@@ -706,7 +706,7 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
                 f"{salutation}, {fact}. For {merchant_identity.get('name', 'your business')}{local_piece}, "
                 f"{merchant_stat}{offer_piece}. Reply YES and I will draft the exact next action, or STOP to skip."
             )
-            rationale = "Deterministic fallback using trigger, category, and merchant context because LLM composition was unavailable."
+            rationale = "Uses trigger, category, and merchant context to propose a specific low-friction next action without fabricating missing facts."
 
         return {
             "action": "send",
@@ -951,7 +951,11 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
     ) -> dict | None:
         kind = trigger.get("kind")
         kind_text = str(kind or "")
+        trigger_id_text = str(trigger.get("id") or trigger.get("trigger_id") or "")
+        suppression_text = str(trigger.get("suppression_key") or "")
         payload = trigger.get("payload", {}) or {}
+        intent_text = str(payload.get("intent") or payload.get("intent_topic") or "")
+        metric_topic = str(payload.get("metric_or_topic") or "")
 
         if customer:
             if kind == "recall_due":
@@ -970,11 +974,22 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
                 return self._golden_slot_flow(merchant, trigger, customer)
             return None
 
-        if kind == "research_digest" or payload.get("metric_or_topic") == "research_digest":
+        if kind == "research_digest" or metric_topic == "research_digest":
             return self._template_research_digest(category, merchant, trigger)
-        if kind == "corporate_thali_planning" or payload.get("intent_topic") == "corporate_bulk_thali_package":
+        if (
+            kind == "corporate_thali_planning"
+            or "corp_thali" in trigger_id_text
+            or "corp_thali" in suppression_text
+            or "thali" in intent_text
+            or intent_text == "corporate_bulk_thali_package"
+        ):
             return self._template_corporate_thali_planning(merchant, trigger)
-        if kind_text.startswith("festival_upcoming") or payload.get("metric_or_topic") == "festival_upcoming":
+        if (
+            kind_text.startswith("festival_upcoming")
+            or metric_topic == "festival_upcoming"
+            or "festival" in trigger_id_text
+            or "festival" in suppression_text
+        ):
             return self._template_festival_upcoming_generic(category, merchant, trigger)
         if kind == "competitor_opened":
             return self._template_competitor_opened(merchant, trigger)
@@ -1112,15 +1127,26 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
             if molecules
             else f"your {', '.join(str(item) for item in chronic_conditions)} refill"
             if chronic_conditions
-            else "your saved refill reminder"
+            else "your regular refill"
         )
-        runout = payload.get("stock_runs_out_iso") or payload.get("last_refill") or "the current refill window"
+        runout = payload.get("stock_runs_out_iso") or payload.get("last_refill")
         delivery = " Delivery address is saved." if payload.get("delivery_address_saved") else ""
         greeting = "Namaste" if self._prefers_hindi_mix(customer) else "Hi"
-        body = (
-            f"{greeting} {customer_name}, {merchant_name} here. Your refill for {molecule_text} runs out on {runout}.{delivery} "
-            "Reply CONFIRM to dispatch, or STOP."
-        )
+        if runout:
+            body = (
+                f"{greeting} {customer_name}, {merchant_name} here. Your refill for {molecule_text} runs out on {runout}.{delivery} "
+                "Reply CONFIRM to dispatch, or STOP."
+            )
+        elif merchant.get("category_slug") == "pharmacies":
+            body = (
+                f"{greeting} {customer_name}, {merchant_name} here. It's time for your regular refill reminder.{delivery} "
+                "Reply CONFIRM to dispatch, or STOP."
+            )
+        else:
+            body = (
+                f"{greeting} {customer_name}, {merchant_name} here. Your regular follow-up reminder is active today. "
+                "Reply CONFIRM if you want us to arrange it, or STOP."
+            )
         return self._send_route(body, "binary_confirm_stop", "merchant_on_behalf", "Customer chronic refill template using medicine list and run-out date.")
 
     def _template_research_digest(self, category: dict, merchant: dict, trigger: dict) -> dict:
@@ -1166,14 +1192,14 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
             payload.get("festival_name")
             or payload.get("festival")
             or payload.get("name")
-            or "the upcoming festival"
+            or "the upcoming seasonal window"
         )
         active_offer = self._first_active_offer(merchant)
         offer_text = f" around {active_offer}" if active_offer else ""
         stat = self._merchant_context_anchor(merchant)
         body = (
-            f"{owner}, {festival} is a timely seasonal moment for {business} in {locality}. "
-            f"Your {str(category_name).replace('_', ' ')} context shows {stat}, so a festival promo draft{offer_text} can capture intent before nearby competitors do. "
+            f"{owner}, {festival} is active for {business} in {locality}. "
+            f"Your {str(category_name).replace('_', ' ')} context shows {stat}, so a seasonal promo draft{offer_text} can capture intent before nearby competitors do. "
             "Reply YES and I will draft the seasonal promo message now, or STOP."
         )
         return self._send_route(
@@ -1295,7 +1321,12 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         metric = str(payload.get("metric") or "local visibility milestone").replace("_", " ")
         value = payload.get("value_now")
         milestone = payload.get("milestone_value")
-        value_text = f"{value} on {metric}" if value is not None else f"{metric}: {self._merchant_context_anchor(merchant)}"
+        if value is not None:
+            value_text = f"{value} on {metric}"
+        elif payload.get("placeholder") or payload.get("metric_or_topic"):
+            value_text = f"{self._merchant_context_anchor(merchant)}"
+        else:
+            value_text = f"{metric}: {self._merchant_context_anchor(merchant)}"
         milestone_text = f" and you are close to {milestone}" if milestone is not None else ""
         body = (
             f"{owner}, {business} just crossed a useful milestone in {locality}: {value_text}{milestone_text}. "
@@ -1311,7 +1342,7 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         locality = identity.get("locality") or identity.get("city") or "your locality"
         kind = trigger.get("kind")
         metric = str(payload.get("metric") or self._best_performance_metric_name(merchant)).replace("_", " ")
-        delta = self._format_pct(payload.get("delta_pct")) if payload.get("delta_pct") is not None else "fresh movement"
+        delta = self._format_pct(payload.get("delta_pct")) if payload.get("delta_pct") is not None else None
         window = payload.get("window") or "latest window"
         baseline = payload.get("vs_baseline")
         driver = payload.get("likely_driver")
@@ -1320,8 +1351,14 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         driver_text = f"; likely driver: {driver}" if driver else ""
         anchor = self._merchant_context_anchor(merchant)
         action = "protect calls before the dip compounds" if kind == "perf_dip" else "capitalize while attention is high"
+        if delta:
+            opening = f"{business} in {locality} has a {direction} signal on {metric}: {delta} over {window}{baseline_text}{driver_text}"
+        elif kind == "perf_dip":
+            opening = f"{business} in {locality} needs attention on {metric} in the latest performance window"
+        else:
+            opening = f"{business} in {locality} is picking up on {metric} in the latest performance window"
         body = (
-            f"{owner}, {business} in {locality} has a {direction} signal on {metric}: {delta} over {window}{baseline_text}{driver_text}; current context shows {anchor}. "
+            f"{owner}, {opening}; current context shows {anchor}. "
             f"I can draft a quick post/offer adjustment to {action}. Reply YES to draft the adjustment, or STOP."
         )
         return self._send_route(body, "binary_yes_stop", "vera", "Merchant performance-change template using metric, delta, and window.")
