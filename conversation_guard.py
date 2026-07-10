@@ -9,6 +9,7 @@ class ConversationGuard:
     HOSTILE_OPT_OUT_RE = re.compile(
         r"(?i)\b(stop|spam|useless|don'?t message|unsubscribe|not interested)\b"
     )
+    OFF_TOPIC_RE = re.compile(r"(?i)\b(gst|tax|loan|filing|ca|accountant)\b")
     COMMITMENT_RE = re.compile(r"(?i)\b(yes|let'?s do it|go ahead|send it|sure|confirm)\b")
     AUTO_REPLY_THRESHOLD = 0.85
 
@@ -43,6 +44,14 @@ class ConversationGuard:
             return {
                 "action": "end",
                 "rationale": "Merchant explicitly opted out or showed hostility. Closing conversation.",
+            }
+
+        if self.OFF_TOPIC_RE.search(self.message):
+            return {
+                "action": "send",
+                "body": "I'll leave the GST and tax filing to your CA! 😅 Coming back to the campaign — want me to draft that customer message for you?",
+                "cta": "open_ended",
+                "rationale": "Out-of-scope ask politely declined; redirected to original Vera task.",
             }
 
         if self.COMMITMENT_RE.search(self.message):

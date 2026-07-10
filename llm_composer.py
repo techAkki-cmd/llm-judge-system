@@ -958,6 +958,8 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
                 return self._golden_slot_flow(merchant, trigger, customer)
             return None
 
+        if kind == "research_digest" or payload.get("metric_or_topic") == "research_digest":
+            return self._template_research_digest(category, merchant, trigger)
         if kind == "competitor_opened":
             return self._template_competitor_opened(merchant, trigger)
         if kind == "curious_ask_due":
@@ -990,8 +992,14 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         payload = trigger.get("payload", {}) or {}
         merchant_name = self._merchant_name(merchant)
         customer_name = self._customer_name(customer)
-        service_due = str(payload.get("service_due") or "follow-up").replace("_", " ")
-        due_date = payload.get("due_date") or "this recall window"
+        relationship = customer.get("relationship", {}) or {}
+        services = relationship.get("services_received") or []
+        service_due = str(
+            payload.get("service_due")
+            or (services[-1] if services else None)
+            or "follow-up"
+        ).replace("_", " ")
+        due_date = payload.get("due_date") or relationship.get("last_visit") or "the active recall list"
         slots = self._slot_labels(payload.get("available_slots", []))
         greeting = "Namaste" if self._prefers_hindi_mix(customer) else "Hi"
         slot_text = (
@@ -1016,14 +1024,29 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         payload = trigger.get("payload", {}) or {}
         merchant_name = self._merchant_name(merchant)
         customer_name = self._customer_name(customer)
+        relationship = customer.get("relationship", {}) or {}
         days = payload.get("days_since_last_visit")
-        focus = str(payload.get("previous_focus") or "your routine").replace("_", " ")
+        services = relationship.get("services_received") or []
+        focus = str(
+            payload.get("previous_focus")
+            or (services[-1] if services else None)
+            or (customer.get("preferences", {}) or {}).get("training_focus")
+            or "your routine"
+        ).replace("_", " ")
         months = payload.get("previous_membership_months")
+        visits = relationship.get("visits_total")
+        last_visit = relationship.get("last_visit")
         greeting = "Namaste" if self._prefers_hindi_mix(customer) else "Hi"
-        timing = f"It's been {days} days since your last visit" if days is not None else "It's been a while since your last visit"
+        if days is not None:
+            timing = f"It's been {days} days since your last visit"
+        elif last_visit:
+            timing = f"Your last visit was on {last_visit}"
+        else:
+            timing = "Your follow-up reminder is active today"
         history = f" after {months} membership months" if months is not None else ""
+        visit_text = f" across {visits} visits" if visits is not None else ""
         body = (
-            f"{greeting} {customer_name}, {merchant_name} here. {timing}{history}; no pressure, this happens. "
+            f"{greeting} {customer_name}, {merchant_name} here. {timing}{history}{visit_text}; no pressure, this happens. "
             f"I kept a no-commitment spot aligned to {focus}. Reply YES to hold the spot, or STOP."
         )
         return self._send_route(body, "binary_yes_stop", "merchant_on_behalf", "Customer lapse winback template using days since last visit and prior focus.")
@@ -1064,8 +1087,18 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         merchant_name = self._merchant_name(merchant)
         customer_name = self._customer_name(customer)
         molecules = payload.get("molecule_list") or []
-        molecule_text = ", ".join(str(molecule) for molecule in molecules) if molecules else "your regular medicines"
-        runout = payload.get("stock_runs_out_iso") or "this refill window"
+        if not molecules and payload.get("molecule"):
+            molecules = [payload.get("molecule")]
+        relationship = customer.get("relationship", {}) or {}
+        chronic_conditions = relationship.get("chronic_conditions") or []
+        molecule_text = (
+            ", ".join(str(molecule) for molecule in molecules)
+            if molecules
+            else f"your {', '.join(str(item) for item in chronic_conditions)} refill"
+            if chronic_conditions
+            else "your saved refill reminder"
+        )
+        runout = payload.get("stock_runs_out_iso") or payload.get("last_refill") or "the current refill window"
         delivery = " Delivery address is saved." if payload.get("delivery_address_saved") else ""
         greeting = "Namaste" if self._prefers_hindi_mix(customer) else "Hi"
         body = (
@@ -1073,6 +1106,31 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
             "Reply CONFIRM to dispatch, or STOP."
         )
         return self._send_route(body, "binary_confirm_stop", "merchant_on_behalf", "Customer chronic refill template using medicine list and run-out date.")
+
+    def _template_research_digest(self, category: dict, merchant: dict, trigger: dict) -> dict:
+        payload = trigger.get("payload", {}) or {}
+        owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
+        category_slug = category.get("display_name") or category.get("slug") or merchant.get("category_slug") or "category"
+        digest_item = self._find_digest_item(category, payload)
+        if not digest_item:
+            digest = category.get("digest") or []
+            digest_item = digest[0] if digest else {}
+        title = digest_item.get("title") or f"latest {str(category_slug).replace('_', ' ')} research digest"
+        source = digest_item.get("source") or "the latest category digest"
+        trial_n = digest_item.get("trial_n")
+        summary = digest_item.get("summary") or digest_item.get("actionable") or ""
+        trial_text = f" ({trial_n:,} sample)" if isinstance(trial_n, int) else ""
+        summary_text = f" Key point: {summary}" if summary else ""
+        stat = self._merchant_context_anchor(merchant)
+        body = (
+            f"{owner}, {source} just dropped: {title}{trial_text}. "
+            f"For {business} in {locality}, {stat}.{summary_text} "
+            "Want me to pull a 2-min abstract and draft the customer WhatsApp from it?"
+        )
+        return self._send_route(body, "natural_question", "vera", "Merchant research digest template using category digest and merchant context.")
 
     def _template_wedding_followup(self, merchant: dict, trigger: dict, customer: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
@@ -1123,12 +1181,19 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
         business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your market"
         days = payload.get("days_since_last_merchant_message")
         last_topic = str(payload.get("last_topic") or "growth").replace("_", " ")
-        days_text = f"It's been {days} days since we chatted" if days is not None else "It's been a while since we chatted"
+        days_text = (
+            f"It's been {days} days since we chatted"
+            if days is not None
+            else "Your latest Vera context is ready today"
+        )
+        anchor = self._merchant_context_anchor(merchant)
         body = (
             f"{owner}, {days_text} about {last_topic}. "
-            f"I found one quick win for {business}: a fresh post or reply draft based on your latest context. Reply YES to see the quick win, or STOP."
+            f"For {business} in {locality}, current context shows {anchor}. Reply YES to see the quick win draft, or STOP."
         )
         return self._send_route(body, "binary_yes_stop", "vera", "Merchant dormancy template using days since last merchant message.")
 
@@ -1150,13 +1215,16 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
     def _template_milestone(self, merchant: dict, trigger: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
-        metric = str(payload.get("metric") or "metric").replace("_", " ")
+        business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your market"
+        metric = str(payload.get("metric") or "local visibility milestone").replace("_", " ")
         value = payload.get("value_now")
         milestone = payload.get("milestone_value")
-        value_text = f"{value} on {metric}" if value is not None else metric
+        value_text = f"{value} on {metric}" if value is not None else f"{metric}: {self._merchant_context_anchor(merchant)}"
         milestone_text = f" and you are close to {milestone}" if milestone is not None else ""
         body = (
-            f"{owner}, you just hit {value_text}{milestone_text}. "
+            f"{owner}, {business} just crossed a useful milestone in {locality}: {value_text}{milestone_text}. "
             "That is a clean customer-thank-you moment. Reply YES to draft the thank-you post, or STOP."
         )
         return self._send_route(body, "binary_yes_stop", "vera", "Merchant milestone template using metric and current value.")
@@ -1165,18 +1233,22 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
         business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
         kind = trigger.get("kind")
-        metric = str(payload.get("metric") or "performance").replace("_", " ")
-        delta = self._format_pct(payload.get("delta_pct")) if payload.get("delta_pct") is not None else "changed"
+        metric = str(payload.get("metric") or self._best_performance_metric_name(merchant)).replace("_", " ")
+        delta = self._format_pct(payload.get("delta_pct")) if payload.get("delta_pct") is not None else "fresh movement"
         window = payload.get("window") or "latest window"
         baseline = payload.get("vs_baseline")
         driver = payload.get("likely_driver")
         direction = "down" if kind == "perf_dip" else "up"
         baseline_text = f" vs baseline {baseline}" if baseline is not None else ""
         driver_text = f"; likely driver: {driver}" if driver else ""
+        anchor = self._merchant_context_anchor(merchant)
+        action = "protect calls before the dip compounds" if kind == "perf_dip" else "capitalize while attention is high"
         body = (
-            f"{owner}, {business}'s {metric} is {direction} {delta} over {window}{baseline_text}{driver_text}. "
-            "I can adjust the next post/offer strategy around this signal. Reply YES to draft the adjustment, or STOP."
+            f"{owner}, {business} in {locality} has a {direction} signal on {metric}: {delta} over {window}{baseline_text}{driver_text}; current context shows {anchor}. "
+            f"I can draft a quick post/offer adjustment to {action}. Reply YES to draft the adjustment, or STOP."
         )
         return self._send_route(body, "binary_yes_stop", "vera", "Merchant performance-change template using metric, delta, and window.")
 
@@ -1447,3 +1519,56 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         if not themes:
             return None
         return max(themes, key=lambda theme: theme.get("occurrences_30d") or 0)
+
+    def _best_performance_metric_name(self, merchant: dict) -> str:
+        performance = merchant.get("performance", {}) or {}
+        for key, label in (
+            ("profile_views_30d", "profile views"),
+            ("views_30d", "profile views"),
+            ("views", "profile views"),
+            ("calls_30d", "calls"),
+            ("calls", "calls"),
+            ("directions_30d", "directions"),
+            ("directions", "directions"),
+            ("ctr", "CTR"),
+        ):
+            if performance.get(key) is not None:
+                return label
+        return "merchant performance"
+
+    def _merchant_context_anchor(self, merchant: dict) -> str:
+        performance = merchant.get("performance", {}) or {}
+        aggregate = merchant.get("customer_aggregate", {}) or {}
+        offers = [offer.get("title") for offer in merchant.get("offers", []) or [] if offer.get("status") == "active" and offer.get("title")]
+        parts: list[str] = []
+        for key, label in (
+            ("profile_views_30d", "profile views"),
+            ("views_30d", "profile views"),
+            ("views", "profile views"),
+            ("calls_30d", "calls"),
+            ("calls", "calls"),
+            ("directions_30d", "directions"),
+            ("directions", "directions"),
+        ):
+            value = performance.get(key)
+            if value is not None:
+                parts.append(f"{value} {label}")
+            if len(parts) >= 2:
+                break
+        ctr = performance.get("ctr")
+        if ctr is not None:
+            parts.append(f"{ctr} CTR")
+        if offers:
+            parts.append(f"active offer: {offers[0]}")
+        for key, label in (
+            ("total_active_members", "active members"),
+            ("delivery_orders_30d", "delivery orders in 30d"),
+            ("chronic_rx_count", "chronic Rx customers"),
+            ("lapsed_180d_plus", "lapsed customers"),
+            ("high_risk_adult_count", "high-risk adult patients"),
+        ):
+            value = aggregate.get(key)
+            if value is not None:
+                parts.append(f"{value} {label}")
+                break
+        return ", ".join(parts[:4]) if parts else "the latest pushed merchant context is available"
