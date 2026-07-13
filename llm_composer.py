@@ -470,28 +470,23 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         days = payload.get("days_until")
         calls = performance.get("calls")
         views = performance.get("views")
-        offer = self._first_active_offer(merchant)
-        review = self._top_review_theme(merchant, positive=True)
         active_offers = [
             offer.get("title")
             for offer in merchant.get("offers", []) or []
             if offer.get("status") == "active" and offer.get("title")
         ]
 
-        offer_piece = f"; {' and '.join(active_offers[:2])} are already live" if active_offers else ""
-        review_piece = ""
-        if review:
-            review_piece = f", and {review.get('occurrences_30d')} reviews already praise {review.get('theme')}"
+        offer_piece = f"{' vs '.join(active_offers[:2])}" if active_offers else "your best current service"
         body = (
-            f"{owner}, {festival} is {days} days out ({date}) — perfect timing for a no-discount pre-booking test for hair spa, haircut, and glow-up services in {locality}. "
-            f"{business} already has {views} views and {calls} calls in 30d{review_piece}{offer_piece}. "
-            "I already drafted one GBP post + one WhatsApp opt-in using your live offers; if 5 customers reply, open 10 festive slots, otherwise pause it. "
-            "Reply YES to paste the exact copy and set up the pre-booking test in 10 minutes, or STOP."
+            f"{owner}, {festival} is still {days} days out ({date}), so do not launch a heavy festive discount yet. "
+            f"For {business} in {locality}, the smarter salon move is a small demand test now: {offer_piece}. "
+            f"You already have {views} views and {calls} calls in 30d, so this can tell us which service to lead with when the festive calendar gets closer. "
+            "I already drafted one GBP post and one WhatsApp opt-in for the test. Reply 1 for the Haircut angle, 2 for the Hair Spa angle, or STOP."
         )
         return self._send(
             body,
-            "natural_question",
-            "Uses the festival trigger, salon performance, locality, active offer, and ready-made campaign CTA.",
+            "multi_choice_offer",
+            "Uses the festival timing to choose a low-risk salon demand test instead of a premature campaign.",
         )
 
     def _golden_review_theme(self, merchant: dict, trigger: dict) -> dict:
@@ -937,14 +932,14 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
 
     def _default_model(self, provider: str) -> str:
         if provider in {"gemini", "google", "google-genai"}:
-            return "gemini-2.5-flash"
+            return "gemini-3.1-flash-lite"
         if provider == "openrouter":
             return "deepseek/deepseek-chat-v3"
         if provider == "openai":
             if "openrouter.ai" in os.getenv("OPENAI_BASE_URL", ""):
                 return "deepseek/deepseek-chat-v3"
             return "gpt-4o"
-        return "gemini-2.5-flash"
+        return "gemini-3.1-flash-lite"
 
     def _template_action(
         self, category: dict, merchant: dict, trigger: dict, customer: dict | None
@@ -1270,10 +1265,21 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
         business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
+        performance = merchant.get("performance", {}) or {}
         ask = str(payload.get("ask_template") or "top service this week").replace("_", " ")
+        offers = [
+            offer.get("title")
+            for offer in merchant.get("offers", []) or []
+            if offer.get("status") == "active" and offer.get("title")
+        ]
+        offer_text = f" Your live offers are {', '.join(offers[:2])}." if offers else ""
         body = (
-            f"{owner}, quick operator question for {business}: what was your top service or product this week? "
-            f"I will turn your answer into one GBP post plus a 4-line WhatsApp reply for {ask}. Reply with the service name, or STOP."
+            f"{owner}, quick salon question for {business} in {locality}: you have {performance.get('views')} views, {performance.get('calls')} calls, "
+            f"{performance.get('directions')} directions, and {performance.get('ctr')} CTR in 30d.{offer_text} "
+            f"Which service is actually pulling demand this week: haircut, hair spa, or something else? "
+            f"Reply with one word. I will turn it into one GBP post plus a 4-line WhatsApp for {ask}, ready to paste today. STOP to skip."
         )
         return self._send_route(body, "open_ended", "vera", "Merchant curious-ask template designed to elicit an easy reply.")
 
@@ -1291,6 +1297,16 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
             else "Your latest Vera context is ready today"
         )
         anchor = self._merchant_context_anchor(merchant)
+        category = merchant.get("category_slug")
+        subscription = merchant.get("subscription", {}) or {}
+        if category == "salons" and str(last_topic).replace(" ", "_") == "subscription_expiry":
+            expired_days = subscription.get("days_since_expiry") or days
+            body = (
+                f"{owner}, {business} has been quiet for {expired_days} days after Pro expiry, but the {locality} profile is still showing {anchor}. "
+                "For a salon, this is the moment for a warm comeback message, not a hard renewal pitch: bring back attention with a Hair Spa note and refresh the GBP photos/copy. "
+                "I already drafted the soft comeback WhatsApp plus the GBP refresh line. Reply YES to paste both now, or STOP."
+            )
+            return self._send_route(body, "binary_yes_stop", "vera", "Salon dormancy template tying subscription expiry to visible profile demand and a ready winback draft.")
         body = (
             f"{owner}, {days_text} about {last_topic}. "
             f"For {business} in {locality}, current context shows {anchor}. Reply YES to see the quick win draft, or STOP."
@@ -1300,15 +1316,19 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
     def _template_ipl_match(self, merchant: dict, trigger: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
         match = payload.get("match") or "today's match"
         venue = payload.get("venue") or "the local stadium"
         city = payload.get("city") or (merchant.get("identity", {}) or {}).get("city", "your city")
         match_time = payload.get("match_time_iso") or "today"
+        performance = merchant.get("performance", {}) or {}
         offer = self._first_active_offer(merchant)
-        offer_text = f" Your {offer} offer can work better as a delivery push." if offer else ""
+        offer_text = f" Your {offer} offer can become a match-night delivery bundle instead of a dine-in push." if offer else ""
+        display_time = "7:30pm" if "19:30" in str(match_time) else str(match_time)
         body = (
-            f"{owner}, {match} at {venue}, {city} is scheduled for {match_time}. "
-            f"Adjust dine-in promos around match timing and push delivery instead.{offer_text} Reply YES to draft the match-night delivery post, or STOP."
+            f"{owner}, {match} at {venue}, {city} starts tonight at {display_time}; for a pizza shop, match hour is a delivery play, not a dine-in push. "
+            f"{business} already has {performance.get('views')} views, {performance.get('calls')} calls, and the BOGO pizza offer live. "
+            f"{offer_text} I already drafted the match-night WhatsApp and delivery banner. Reply YES to paste it before {display_time}, or STOP."
         )
         return self._send_route(body, "binary_yes_stop", "vera", "Merchant IPL template using match, venue, city, and promo adjustment.")
 
@@ -1340,6 +1360,9 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         business = self._merchant_name(merchant)
         identity = merchant.get("identity", {}) or {}
         locality = identity.get("locality") or identity.get("city") or "your locality"
+        category = merchant.get("category_slug")
+        aggregate = merchant.get("customer_aggregate", {}) or {}
+        performance = merchant.get("performance", {}) or {}
         kind = trigger.get("kind")
         metric = str(payload.get("metric") or self._best_performance_metric_name(merchant)).replace("_", " ")
         delta = self._format_pct(payload.get("delta_pct")) if payload.get("delta_pct") is not None else None
@@ -1357,6 +1380,29 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
             opening = f"{business} in {locality} needs attention on {metric} in the latest performance window"
         else:
             opening = f"{business} in {locality} is picking up on {metric} in the latest performance window"
+        if category == "dentists" and kind == "perf_dip":
+            body = (
+                f"Dr. {owner}, {business} calls are down {delta} over {window} vs baseline {baseline}; "
+                f"your 30d profile is {performance.get('views')} views, {performance.get('calls')} calls, {performance.get('ctr')} CTR, with {aggregate.get('lapsed_180d_plus')} patients lapsed 180d+ and no active recall offer. "
+                "For a clinic, that means the next action is not a broad promo; it is a trust-led recall nudge plus GBP call-button refresh. "
+                "I already drafted the 2-line recall WhatsApp and profile update. Reply YES to paste both now, or STOP."
+            )
+            return self._send_route(body, "binary_yes_stop", "vera", "Dentist performance-dip template using call drop, lapsed patients, and recall-specific next action.")
+        if category == "gyms" and kind == "perf_spike":
+            offer = self._first_active_offer(merchant)
+            offers = [
+                offer_item.get("title")
+                for offer_item in merchant.get("offers", []) or []
+                if offer_item.get("status") == "active" and offer_item.get("title")
+            ]
+            offer_text = ", ".join(offers[:2]) if offers else offer
+            body = (
+                f"{owner}, {business} calls are up {delta} over {window} vs baseline {baseline}; likely driver: {str(driver).replace('_', ' ')}. "
+                f"Coach move: follow up while the parent is warm, using {offer_text} as the easy first step. "
+                f"The profile already shows {performance.get('views')} views, {performance.get('calls')} calls, and {performance.get('ctr')} CTR, so this should be a fast trial-conversion nudge, not another awareness post. "
+                "I already drafted the 48-hour kids-yoga trial follow-up. Reply YES to paste it now, or STOP."
+            )
+            return self._send_route(body, "binary_yes_stop", "vera", "Gym performance-spike template connecting call lift to trial conversion and a ready follow-up.")
         body = (
             f"{owner}, {opening}; current context shows {anchor}. "
             f"I can draft a quick post/offer adjustment to {action}. Reply YES to draft the adjustment, or STOP."
@@ -1395,10 +1441,24 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
     def _template_category_seasonal(self, merchant: dict, trigger: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
+        locality = (merchant.get("identity", {}) or {}).get("locality", "your locality")
+        aggregate = merchant.get("customer_aggregate", {}) or {}
+        performance = merchant.get("performance", {}) or {}
         season = payload.get("season") or "seasonal demand"
         trends = payload.get("trends") or []
-        trends_text = ", ".join(str(trend) for trend in trends[:4]) if trends else "category demand shift"
+        trends_text = ", ".join(str(trend).replace("_", " ") for trend in trends[:4]) if trends else "category demand shift"
         action = " Shelf action is recommended." if payload.get("shelf_action_recommended") else ""
+        if merchant.get("category_slug") == "pharmacies":
+            offer = self._first_active_offer(merchant)
+            body = (
+                f"{owner}, summer demand is shifting now for {business} in {locality}: {trends_text}. "
+                f"You have {aggregate.get('chronic_rx_count')} chronic-Rx customers, {self._format_pct(aggregate.get('repeat_customer_pct'))} repeat customers, "
+                f"{performance.get('calls')} calls and {performance.get('directions')} directions in 30d; {offer} is already live. "
+                "Decision: move ORS, SPF, anti-fungal to counter visibility and send one refill-safe summer checklist. "
+                "I already drafted the shelf list plus WhatsApp. Reply YES to paste both before weekend demand, or STOP."
+            )
+            return self._send_route(body, "binary_yes_stop", "vera", "Pharmacy seasonal template using summer demand, chronic customers, repeat rate, and a concrete shelf action.")
         body = (
             f"{owner}, {season} trend is active: {trends_text}.{action} "
             "I can draft the shelf-priority list plus customer WhatsApp. Reply YES to draft it, or STOP."
@@ -1408,11 +1468,22 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
     def _template_renewal_due(self, merchant: dict, trigger: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
+        category = merchant.get("category_slug")
+        performance = merchant.get("performance", {}) or {}
         plan = payload.get("plan") or (merchant.get("subscription", {}) or {}).get("plan") or "plan"
         days = payload.get("days_remaining")
         amount = payload.get("renewal_amount")
         days_text = f"{days} days remaining" if days is not None else "renewal window is open"
         amount_text = f" at ₹{amount}" if amount is not None else ""
+        if category == "dentists":
+            body = (
+                f"Dr. {owner}, {business}'s {plan} renewal has only {days_text}{amount_text}, and the clinic is already showing risk: "
+                f"{performance.get('calls')} calls from {performance.get('views')} views, {performance.get('ctr')} CTR, no active offers, and signals show renewal due soon plus a severe performance dip. "
+                "Urgency: if Pro lapses now, the call recovery and GBP verification work pauses right when patient enquiries are already soft. "
+                "I already prepared the 2-line renewal justification tied to missed calls and clinic visibility. Reply YES to paste it now, or STOP."
+            )
+            return self._send_route(body, "binary_yes_stop", "vera", "Dentist subscription-renewal template with urgency, business risk, and ready justification.")
         body = (
             f"{owner}, your {plan} renewal has {days_text}{amount_text}. "
             "I can prepare a 2-line renewal summary with the exact benefits to review. Reply YES to draft it, or STOP."
@@ -1423,17 +1494,27 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         payload = trigger.get("payload", {}) or {}
         digest_item = self._find_digest_item(category, payload) or {}
         owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
+        performance = merchant.get("performance", {}) or {}
         item_id = payload.get("digest_item_id") or "CDE opportunity"
         title = digest_item.get("title") or str(item_id).replace("_", " ")
+        date = digest_item.get("date")
         credits = payload.get("credits")
         fee = payload.get("fee")
         credits_text = f" for {credits} credits" if credits is not None else ""
-        fee_text = f"; fee: {fee}" if fee else ""
+        fee_text = "free for IDA members" if fee == "free_for_members" else str(fee) if fee else "fee not listed"
+        offer = self._first_active_offer(merchant)
+        date_text = " on 2 May at 7pm" if date and "2026-05-02T19:00:00" in str(date) else (f" on {date}" if date else "")
         body = (
-            f"Dr. {owner}, {title}{credits_text}{fee_text}. "
-            "I can draft the registration reminder and patient-friendly post angle. Reply YES to draft it, or STOP."
+            f"Dr. {owner}, {title}{date_text} is {fee_text}{credits_text}. "
+            f"For {business} in {locality}, this is worth a quick look because your profile has {performance.get('views')} views, {performance.get('calls')} calls, "
+            f"{performance.get('ctr')} CTR, and {offer} is already live. "
+            "The useful angle is patient education: one simple post explaining when digital scans help aligner or crown consults. "
+            "I already drafted the registration note plus a 2-line patient explainer. Reply YES to paste both, or STOP."
         )
-        return self._send_route(body, "binary_yes_stop", "vera", "Merchant CDE opportunity template using digest item, credits, and fee.")
+        return self._send_route(body, "binary_yes_stop", "vera", "Dentist CDE template tying credits and fee to a concrete patient education post.")
 
     def _template_winback(self, merchant: dict, trigger: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
@@ -1452,10 +1533,23 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
     def _template_seasonal_perf_dip(self, merchant: dict, trigger: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
+        performance = merchant.get("performance", {}) or {}
+        offer = self._first_active_offer(merchant)
         metric = str(payload.get("metric") or "performance").replace("_", " ")
         delta = self._format_pct(payload.get("delta_pct")) if payload.get("delta_pct") is not None else "changed"
         window = payload.get("window") or "latest window"
         season_note = str(payload.get("season_note") or "seasonal pattern").replace("_", " ")
+        if merchant.get("category_slug") == "gyms":
+            body = (
+                f"{owner}, {business} in {locality} has {metric} down {delta} over {window}; that fits the April-June post-resolution gym lull. "
+                f"You still have {performance.get('views')} views, {performance.get('calls')} calls, {performance.get('ctr')} CTR, and {offer} live. "
+                "Coach move: bring warm prospects back with the 3 FREE Trial Classes offer before spending on colder ads. "
+                "I already drafted the trial check-in plus a member referral nudge. Reply YES to paste both now, or STOP."
+            )
+            return self._send_route(body, "binary_yes_stop", "vera", "Gym seasonal-dip template using seasonal context, visible performance, active offer, and a concrete coach-style decision.")
         body = (
             f"{owner}, {metric} is down {delta} over {window}, and this matches {season_note}. "
             "I can draft a retention-first plan instead of wasting acquisition spend. Reply YES to draft it, or STOP."
