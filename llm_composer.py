@@ -478,9 +478,9 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
 
         offer_piece = f"{' vs '.join(active_offers[:2])}" if active_offers else "your best current service"
         body = (
-            f"{owner}, {festival} is {days} days out ({date}); do a small salon demand test now, not a heavy discount. "
-            f"For {business} in {locality}: {views} views, {calls} calls, and live offers {offer_piece}. "
-            "I drafted one GBP post and WhatsApp opt-in. Reply 1 for Haircut, 2 for Hair Spa, or STOP."
+            f"{owner}, {festival} is {days} days out ({date}); start a salon pre-booking test, not a discount blast. "
+            f"{business} in {locality} has {views} views, {calls} calls, and live offers {offer_piece}. "
+            "I drafted copy to test which service should open festive slots. Reply 1 Haircut, 2 Hair Spa, or STOP."
         )
         return self._send(
             body,
@@ -556,14 +556,21 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         path = str(payload.get("verification_path", "postcard_or_phone_call")).replace("_", " ")
         uplift = payload.get("estimated_uplift_pct")
         chronic = aggregate.get("chronic_rx_count")
-        repeat = aggregate.get("repeat_customer_pct")
         views = performance.get("views")
         calls = performance.get("calls")
+        directions = performance.get("directions")
+        signals = [
+            str(signal).replace("_", " ").replace("gbp", "GBP")
+            for signal in merchant.get("signals", []) or []
+        ]
+        signal_piece = ", ".join(signals[:2])
+        uplift_text = self._format_pct(uplift)
+        path_text = path.capitalize()
 
         body = (
-            f"{owner}, {business} in {locality} is still unverified on GBP despite {views} views and {calls} calls in 30d. "
-            f"With {chronic} chronic-Rx customers and {repeat} repeat customers, {path} is the trust lever. "
-            "I prepared the 5-minute GBP steps. Reply YES to paste them, or STOP."
+            f"{owner}, {business} is GBP-unverified in {locality}: {views} views, {calls} calls, {directions} directions in 30d"
+            f"{'; ' + signal_piece if signal_piece else ''}. For {chronic} chronic-Rx customers, trust comes before refill conversion. "
+            f"{path_text} can unlock {uplift_text} uplift. Reply YES for the 5-min checklist, or STOP."
         )
         return self._send(
             body,
@@ -1297,10 +1304,11 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         subscription = merchant.get("subscription", {}) or {}
         if category == "salons" and str(last_topic).replace(" ", "_") == "subscription_expiry":
             expired_days = subscription.get("days_since_expiry") or days
+            aggregate = merchant.get("customer_aggregate", {}) or {}
+            lapsed = aggregate.get("lapsed_90d_plus")
             body = (
-                f"{owner}, {business} has been quiet {expired_days} days after Pro expiry, but {locality} still shows {anchor}. "
-                "Salon move: a warm Hair Spa comeback note plus GBP refresh, not a hard renewal pitch. "
-                "I drafted both. Reply YES to paste them, or STOP."
+                f"{owner}, {business} has been quiet {expired_days} days after Pro expiry; {locality} still shows {anchor}, but {lapsed} clients are 90d+ lapsed. "
+                "Salon move: soft Hair Spa comeback + GBP refresh before renewal. Reply YES to paste both, or STOP."
             )
             return self._send_route(body, "binary_yes_stop", "vera", "Salon dormancy template tying subscription expiry to visible profile demand and a ready winback draft.")
         body = (
@@ -1452,9 +1460,9 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
                 .replace("cold cough demand -60", "cold/cough -60")
             )
             body = (
-                f"{owner}, summer demand is shifting for {business} in {locality}: {short_trends}. "
-                f"Context: {aggregate.get('chronic_rx_count')} chronic-Rx customers, {self._format_pct(aggregate.get('repeat_customer_pct'))} repeats, "
-                f"{performance.get('calls')} calls, {performance.get('directions')} directions. Move ORS/SPF/anti-fungal to counter. Reply YES to paste the shelf list plus WhatsApp, or STOP."
+                f"{owner}, summer shelf mix should change now at {business}, {locality}: {short_trends}. "
+                f"You have {aggregate.get('chronic_rx_count')} chronic-Rx customers, {self._format_pct(aggregate.get('repeat_customer_pct'))} repeats, and {performance.get('directions')} direction requests. "
+                "Move ORS/SPF/anti-fungal to counter. Reply YES for shelf list + WhatsApp, or STOP."
             )
             return self._send_route(body, "binary_yes_stop", "vera", "Pharmacy seasonal template using summer demand, chronic customers, repeat rate, and a concrete shelf action.")
         body = (
@@ -1475,11 +1483,12 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         days_text = f"{days} days remaining" if days is not None else "renewal window is open"
         amount_text = f" at ₹{amount}" if amount is not None else ""
         if category == "dentists":
+            aggregate = merchant.get("customer_aggregate", {}) or {}
+            lapsed = aggregate.get("lapsed_180d_plus")
             body = (
-                f"Dr. {owner}, {business}'s {plan} renewal has only {days_text}{amount_text}, and the clinic is already showing risk: "
-                f"{performance.get('calls')} calls from {performance.get('views')} views, {performance.get('ctr')} CTR, no active offers, and signals show renewal due soon plus a severe performance dip. "
-                "Urgency: if Pro lapses now, the call recovery and GBP verification work pauses right when patient enquiries are already soft. "
-                "I already prepared the 2-line renewal justification tied to missed calls and clinic visibility. Reply YES to paste it now, or STOP."
+                f"Dr. {owner}, {plan} renewal has {days_text}{amount_text}; {business} has only {performance.get('calls')} calls from {performance.get('views')} views, "
+                f"{performance.get('ctr')} CTR, and {lapsed} patients lapsed 180d+. Decision: renew only if we use it for recall recovery, not vanity posts. "
+                "Reply YES for the 2-line renewal case, or STOP."
             )
             return self._send_route(body, "binary_yes_stop", "vera", "Dentist subscription-renewal template with urgency, business risk, and ready justification.")
         body = (
@@ -1508,17 +1517,27 @@ Now, craft the next message using the provided Category, Merchant, Trigger, and 
         date_text = " on 2 May at 7pm" if date and "2026-05-02T19:00:00" in str(date) else (f" on {date}" if date else "")
         body = (
             f"Dr. {owner}, {short_title}{date_text} is {fee_text}{credits_text}. "
-            f"For {business} in {locality}: {performance.get('views')} views, {performance.get('calls')} calls, {performance.get('ctr')} CTR, and {offer} live. "
-            "Angle: patient-ed on when digital scans help aligner/crown consults. Reply YES to paste the note plus explainer, or STOP."
+            f"For {business}: {performance.get('views')} views, {performance.get('calls')} calls, {performance.get('ctr')} CTR, {offer} live. "
+            "Use it as patient-ed: when scans help aligner/crown consults. Reply YES for the note + explainer, or STOP."
         )
         return self._send_route(body, "binary_yes_stop", "vera", "Dentist CDE template tying credits and fee to a concrete patient education post.")
 
     def _template_winback(self, merchant: dict, trigger: dict) -> dict:
         payload = trigger.get("payload", {}) or {}
         owner = self._owner_name(merchant)
+        business = self._merchant_name(merchant)
+        identity = merchant.get("identity", {}) or {}
+        locality = identity.get("locality") or identity.get("city") or "your locality"
+        performance = merchant.get("performance", {}) or {}
         days = payload.get("days_since_expiry")
         dip = self._format_pct(payload.get("perf_dip_pct")) if payload.get("perf_dip_pct") is not None else "post-expiry dip"
         lapsed = payload.get("lapsed_customers_added_since_expiry")
+        if merchant.get("category_slug") == "salons":
+            body = (
+                f"{owner}, {business} in {locality} is {days} days post-expiry: calls down {dip}, {lapsed} more lapsed clients, only {performance.get('calls')} calls in 30d. "
+                "Salon move: Hair Spa comeback offer to warm clients before renewal. Reply YES to paste the winback copy, or STOP."
+            )
+            return self._send_route(body, "binary_yes_stop", "vera", "Salon winback template tying expiry, call dip, and lapsed clients to a comeback offer.")
         days_text = f"{days} days since expiry" if days is not None else "after expiry"
         lapsed_text = f" and {lapsed} lapsed customers added" if lapsed is not None else ""
         body = (
