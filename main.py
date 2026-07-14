@@ -15,6 +15,7 @@ from conversation_guard import ConversationGuard
 from llm_composer import LLMComposer
 from schemas import ContextPush, PAYLOAD_MODELS, ReplyRequest, Scope, TickRequest
 from state_store import conversation_store, store
+from validator import ResponseValidator
 
 
 START_TIME = time.monotonic()
@@ -23,6 +24,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="magicpin AI Challenge Bot", version=os.getenv("APP_VERSION", "1.0.0"))
 composer = LLMComposer()
+response_validator = ResponseValidator()
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -190,6 +192,7 @@ async def tick(body: TickRequest) -> dict[str, list[Any]]:
                 "suppression_key": trigger.get("suppression_key", ""),
             }
         )
+        action = response_validator.normalize_action(action)
         if not await store.reserve_suppression_key(str(action.get("suppression_key") or "")):
             continue
         actions.append(action)
@@ -201,18 +204,27 @@ async def reply(body: ReplyRequest) -> dict[str, Any]:
     history = await conversation_store.append_turn(
         body.conversation_id, body.from_role, body.message, body.turn_number
     )
-    guard = ConversationGuard(body.conversation_id, body.merchant_id, body.message, history)
+    merchant = await store.get_payload(Scope.merchant, body.merchant_id) if body.merchant_id else None
+    customer = await store.get_payload(Scope.customer, body.customer_id) if body.customer_id else None
+    guard = ConversationGuard(
+        body.conversation_id,
+        body.merchant_id,
+        body.message,
+        history,
+        merchant=merchant,
+        customer=customer,
+        from_role=body.from_role,
+    )
     response = guard.route()
     if guard.intent_actioned:
         await conversation_store.append_flag(body.conversation_id, {"intent_actioned": True})
     if response.get("body") != "[LLM COMPOSE STUB]":
-        return response
+        return response_validator.normalize_action(response)
 
     if not body.merchant_id:
         return {"action": "wait", "wait_seconds": 300, "rationale": "LLM timeout fallback."}
 
     history = await conversation_store.history(body.conversation_id)
-    merchant = await store.get_payload(Scope.merchant, body.merchant_id)
     if not merchant:
         return {"action": "wait", "wait_seconds": 300, "rationale": "LLM timeout fallback."}
 
@@ -222,7 +234,8 @@ async def reply(body: ReplyRequest) -> dict[str, Any]:
         return {"action": "wait", "wait_seconds": 300, "rationale": "LLM timeout fallback."}
 
     try:
-        return await composer.generate_action(category, merchant, {}, None, history)
+        action = await composer.generate_action(category, merchant, {}, None, history)
+        return response_validator.normalize_action(action)
     except Exception as exc:
         logger.warning("LLM composer failed for reply %s: %s", body.conversation_id, exc)
         return {"action": "wait", "wait_seconds": 300, "rationale": "LLM timeout fallback."}

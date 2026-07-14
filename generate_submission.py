@@ -151,6 +151,8 @@ def validate_action(test_id: str, action: dict[str, Any]) -> None:
     body = str(action.get("body") or "")
     if not body.strip():
         raise RuntimeError(f"{test_id}: empty action body")
+    if len(body) > 320:
+        raise RuntimeError(f"{test_id}: action body exceeds 320 characters: {len(body)}")
     for marker in FALLBACK_MARKERS:
         if marker in body or marker in str(action.get("rationale") or ""):
             raise RuntimeError(f"{test_id}: fallback marker detected: {marker}")

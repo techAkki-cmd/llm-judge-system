@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from conversation_guard import ConversationGuard
+from validator import ResponseValidator
+
+
+validator = ResponseValidator()
 
 
 def respond(state: Any, merchant_message: str) -> dict[str, Any]:
@@ -37,8 +41,16 @@ def handle_reply(
     turn_number = _next_turn_number(history)
     guard_history = list(history or [])
     guard_history.append({"from": "merchant", "msg": message, "turn": turn_number})
-    guard = ConversationGuard(conversation_id, merchant_id, message or "", guard_history)
-    return guard.route()
+    guard = ConversationGuard(
+        conversation_id,
+        merchant_id,
+        message or "",
+        guard_history,
+        merchant=merchant,
+        customer=customer,
+        from_role="merchant",
+    )
+    return validator.normalize_action(guard.route())
 
 
 def _conversation_id(

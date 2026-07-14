@@ -320,7 +320,7 @@ class TriggerContext(FlexibleModel):
     id: str
     scope: Literal["merchant", "customer"]
     kind: str
-    source: Literal["external", "internal"]
+    source: Optional[str] = None
     merchant_id: str
     customer_id: Optional[str] = None
     payload: TriggerPayload = Field(default_factory=TriggerPayload)
